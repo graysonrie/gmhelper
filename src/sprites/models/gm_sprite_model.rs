@@ -1,5 +1,190 @@
 use serde::{Deserialize, Serialize};
 
+use crate::sprites::bbox::BBox;
+
+impl GMSpriteModel {
+    /// Build a complete `GMSpriteModel` ready to be serialized as a `.yy` file.
+    ///
+    /// * `name`        - sprite resource name (e.g. "sPlayerIdle")
+    /// * `width`/`height` - dimensions of every frame in pixels
+    /// * `frame_guids` - one UUID string per frame, already generated
+    /// * `layer_guid`  - the single image-layer UUID shared by all frames
+    /// * `parent`      - the GM folder reference (name + folderPath)
+    /// * `bbox`        - tight bounding box computed from pixel data, or None if fully transparent
+    pub fn new(
+        name: &str,
+        width: i32,
+        height: i32,
+        frame_guids: &[String],
+        layer_guid: &str,
+        parent: ResourceReference,
+        bbox: Option<BBox>,
+    ) -> Self {
+        let bbox = bbox.unwrap_or(BBox {
+            left: 0,
+            top: 0,
+            right: width - 1,
+            bottom: height - 1,
+        });
+
+        let sprite_yy_path = format!("sprites/{name}/{name}.yy");
+
+        let frames: Vec<GMSpriteFrame> = frame_guids
+            .iter()
+            .map(|guid| GMSpriteFrame {
+                gmsprite_frame: "v1".to_string(),
+                name_field: guid.clone(),
+                name: guid.clone(),
+                resource_type: "GMSpriteFrame".to_string(),
+                resource_version: "2.0".to_string(),
+            })
+            .collect();
+
+        let keyframes: Vec<SpriteFrameKeyframe> = frame_guids
+            .iter()
+            .enumerate()
+            .map(|(i, guid)| SpriteFrameKeyframe {
+                keyframe_sprite_frame_keyframe: String::new(),
+                channels: KeyframeChannels {
+                    channel_0: SpriteFrameKeyframeChannel {
+                        sprite_frame_keyframe: String::new(),
+                        id: ResourceReference {
+                            name: guid.clone(),
+                            path: sprite_yy_path.clone(),
+                        },
+                        resource_type: "SpriteFrameKeyframe".to_string(),
+                        resource_version: "2.0".to_string(),
+                    },
+                },
+                disabled: false,
+                id: uuid::Uuid::new_v4().to_string(),
+                is_creation_key: false,
+                key: i as f64,
+                length: 1.0,
+                resource_type: "Keyframe<SpriteFrameKeyframe>".to_string(),
+                resource_version: "2.0".to_string(),
+                stretch: false,
+            })
+            .collect();
+
+        let track = GMSpriteFramesTrack {
+            gmsprite_frames_track: String::new(),
+            builtin_name: 0,
+            events: Vec::new(),
+            inherits_track_colour: true,
+            interpolation: 1,
+            is_creation_track: false,
+            keyframes: SpriteFrameKeyframeStore {
+                keyframe_store: String::new(),
+                keyframes,
+                resource_type: "KeyframeStore<SpriteFrameKeyframe>".to_string(),
+                resource_version: "2.0".to_string(),
+            },
+            modifiers: Vec::new(),
+            name: "frames".to_string(),
+            resource_type: "GMSpriteFramesTrack".to_string(),
+            resource_version: "2.0".to_string(),
+            sprite_id: None,
+            track_colour: 0,
+            tracks: Vec::new(),
+            traits: 0,
+        };
+
+        let sequence = GMSequence {
+            gmsequence: "v1".to_string(),
+            name_field: name.to_string(),
+            auto_record: true,
+            backdrop_height: 768,
+            backdrop_image_opacity: 0.5,
+            backdrop_image_path: String::new(),
+            backdrop_width: 1366,
+            backdrop_x_offset: 0.0,
+            backdrop_y_offset: 0.0,
+            events: MessageEventKeyframeStore {
+                keyframe_store: String::new(),
+                keyframes: Vec::new(),
+                resource_type: "KeyframeStore<MessageEventKeyframe>".to_string(),
+                resource_version: "2.0".to_string(),
+            },
+            event_stub_script: None,
+            event_to_function: serde_json::Value::Object(serde_json::Map::new()),
+            length: frame_guids.len() as f64,
+            lock_origin: false,
+            moments: MomentsEventKeyframeStore {
+                keyframe_store: String::new(),
+                keyframes: Vec::new(),
+                resource_type: "KeyframeStore<MomentsEventKeyframe>".to_string(),
+                resource_version: "2.0".to_string(),
+            },
+            name: name.to_string(),
+            playback: 1,
+            playback_speed: 30.0,
+            playback_speed_type: 0,
+            resource_type: "GMSequence".to_string(),
+            resource_version: "2.0".to_string(),
+            show_backdrop: true,
+            show_backdrop_image: false,
+            time_units: 1,
+            tracks: vec![track],
+            visible_range: None,
+            volume: 1.0,
+            xorigin: 0,
+            yorigin: 0,
+        };
+
+        let layer = GMImageLayer {
+            gmimage_layer: String::new(),
+            name_field: layer_guid.to_string(),
+            blend_mode: 0,
+            display_name: "default".to_string(),
+            is_locked: false,
+            name: layer_guid.to_string(),
+            opacity: 100.0,
+            resource_type: "GMImageLayer".to_string(),
+            resource_version: "2.0".to_string(),
+            visible: true,
+        };
+
+        Self {
+            gmsprite: "v2".to_string(),
+            name_field: name.to_string(),
+            bbox_mode: 0,
+            bbox_bottom: bbox.bottom,
+            bbox_left: bbox.left,
+            bbox_right: bbox.right,
+            bbox_top: bbox.top,
+            collision_kind: 1,
+            collision_tolerance: 0,
+            dynamic_texture_page: false,
+            edge_filtering: false,
+            for_3d: false,
+            frames,
+            grid_x: 0,
+            grid_y: 0,
+            height,
+            h_tile: false,
+            layers: vec![layer],
+            name: name.to_string(),
+            nine_slice: None,
+            origin: 0,
+            parent,
+            pre_multiply_alpha: false,
+            resource_type: "GMSprite".to_string(),
+            resource_version: "2.0".to_string(),
+            sequence,
+            swatch_colours: None,
+            swf_precision: 0.5,
+            texture_group_id: ResourceReference {
+                name: "Default".to_string(),
+                path: "texturegroups/Default".to_string(),
+            },
+            sprite_type: 0,
+            v_tile: false,
+            width,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GMSpriteModel {
@@ -10,13 +195,25 @@ pub struct GMSpriteModel {
     pub name_field: String,
 
     pub bbox_mode: i32,
+
+    #[serde(rename = "bbox_bottom")]
     pub bbox_bottom: i32,
+
+    #[serde(rename = "bbox_left")]
     pub bbox_left: i32,
+
+    #[serde(rename = "bbox_right")]
     pub bbox_right: i32,
+
+    #[serde(rename = "bbox_top")]
     pub bbox_top: i32,
+
     pub collision_kind: i32,
     pub collision_tolerance: i32,
+
+    #[serde(rename = "DynamicTexturePage")]
     pub dynamic_texture_page: bool,
+
     pub edge_filtering: bool,
 
     #[serde(rename = "For3D")]
@@ -118,8 +315,6 @@ pub struct GMSequence {
     pub playback_speed_type: i32,
     pub resource_type: String,
     pub resource_version: String,
-    pub seq_height: f64,
-    pub seq_width: f64,
     pub show_backdrop: bool,
     pub show_backdrop_image: bool,
     pub time_units: i32,
@@ -136,6 +331,7 @@ pub struct MessageEventKeyframeStore {
     #[serde(rename = "$KeyframeStore<MessageEventKeyframe>")]
     pub keyframe_store: String,
 
+    #[serde(rename = "Keyframes")]
     pub keyframes: Vec<serde_json::Value>,
     pub resource_type: String,
     pub resource_version: String,
@@ -147,6 +343,7 @@ pub struct MomentsEventKeyframeStore {
     #[serde(rename = "$KeyframeStore<MomentsEventKeyframe>")]
     pub keyframe_store: String,
 
+    #[serde(rename = "Keyframes")]
     pub keyframes: Vec<serde_json::Value>,
     pub resource_type: String,
     pub resource_version: String,
@@ -158,6 +355,7 @@ pub struct SpriteFrameKeyframeStore {
     #[serde(rename = "$KeyframeStore<SpriteFrameKeyframe>")]
     pub keyframe_store: String,
 
+    #[serde(rename = "Keyframes")]
     pub keyframes: Vec<SpriteFrameKeyframe>,
     pub resource_type: String,
     pub resource_version: String,
@@ -191,8 +389,12 @@ pub struct SpriteFrameKeyframe {
     #[serde(rename = "$Keyframe<SpriteFrameKeyframe>")]
     pub keyframe_sprite_frame_keyframe: String,
 
+    #[serde(rename = "Channels")]
     pub channels: KeyframeChannels,
+
+    #[serde(rename = "Disabled")]
     pub disabled: bool,
+
     pub id: String,
 
     #[serde(rename = "IsCreationKey")]
@@ -223,6 +425,7 @@ pub struct SpriteFrameKeyframeChannel {
     #[serde(rename = "$SpriteFrameKeyframe")]
     pub sprite_frame_keyframe: String,
 
+    #[serde(rename = "Id")]
     pub id: ResourceReference,
     pub resource_type: String,
     pub resource_version: String,

@@ -23,6 +23,11 @@ struct Args {
     /// Start watching the current working directory
     #[arg(short, long)]
     start: bool,
+
+    /// Path to a GameMaker .yyp project file. When set, exported frames are
+    /// imported directly into the project instead of being saved as GIF/PNG.
+    #[arg(short, long, value_name = "YYP_FILE")]
+    project: Option<PathBuf>,
 }
 
 fn main() {
@@ -61,6 +66,25 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Validate the --project flag if provided
+    let project_path = args.project.map(|p| {
+        if !p.exists() {
+            eprintln!("Error: Project file '{}' does not exist", p.display());
+            std::process::exit(1);
+        }
+        match p.extension().and_then(|e| e.to_str()) {
+            Some("yyp") => {}
+            _ => {
+                eprintln!(
+                    "Error: '{}' is not a .yyp file. Provide a valid GameMaker project file.",
+                    p.display()
+                );
+                std::process::exit(1);
+            }
+        }
+        p
+    });
+
     // Ensure the export script is available and get its path
     let script_path = ensure_script_available().unwrap_or_else(|e| {
         eprintln!("Error: Failed to set up export script: {e}");
@@ -68,6 +92,9 @@ fn main() {
     });
 
     println!("Watching directory: {}", watch_directory.display());
+    if let Some(ref pp) = project_path {
+        println!("GameMaker project: {}", pp.display());
+    }
     println!("Press Ctrl+C to stop...\n");
 
     // Create a channel to receive events
@@ -91,7 +118,12 @@ fn main() {
                         if let Some(ext) = path.extension() {
                             if ext == "aseprite" && path.exists() {
                                 println!("Processing: {}", path.display());
-                                if let Err(e) = export_tags(&path, &script_path) {
+                                if let Err(e) = export_tags(
+                                    &path,
+                                    &script_path,
+                                    project_path.as_deref(),
+                                    &watch_directory,
+                                ) {
                                     eprintln!("Error exporting {}: {}", path.display(), e);
                                 }
                             }
@@ -114,7 +146,12 @@ struct SpriteExportInfo {
     tag_name: String,
 }
 
-fn export_tags(aseprite_path: &Path, script_path: &Path) -> Result<(), String> {
+fn export_tags(
+    aseprite_path: &Path,
+    script_path: &Path,
+    project_path: Option<&Path>,
+    watch_dir: &Path,
+) -> Result<(), String> {
     // Get the output directory (same as the .aseprite file)
     let output_dir = aseprite_path
         .parent()
@@ -181,29 +218,64 @@ fn export_tags(aseprite_path: &Path, script_path: &Path) -> Result<(), String> {
         println!("Found {} spritesheet(s) to process", export_infos.len());
     }
 
-    for info in export_infos {
+    for info in &export_infos {
         println!("Processing spritesheet: {}", info.path);
-        if let Err(e) = split_spritesheet(&info, output_dir) {
-            eprintln!("Error splitting spritesheet {}: {e}", info.path);
+
+        let frames = match extract_frames(info) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Error extracting frames from {}: {e}", info.path);
+                continue;
+            }
+        };
+
+        if let Some(yyp) = project_path {
+            // GameMaker import path
+            let sprite_name =
+                sprites::gm_import::derive_sprite_name(aseprite_path, &info.tag_name)?;
+            let gm_folder =
+                sprites::gm_import::compute_gm_folder_path(watch_dir, aseprite_path);
+
+            if let Err(e) = sprites::gm_import::import_sprite_to_project(
+                yyp,
+                &sprite_name,
+                &frames,
+                &gm_folder,
+                info.width,
+                info.height,
+            ) {
+                eprintln!("Error importing sprite to GM project: {e}");
+            }
+        } else {
+            // Normal GIF/PNG export path
+            if let Err(e) = save_frames_as_output(info, &frames, output_dir) {
+                eprintln!("Error saving output for {}: {e}", info.path);
+            }
+        }
+
+        // Clean up the temporary spritesheet
+        let spritesheet_path = Path::new(&info.path);
+        if spritesheet_path.exists() {
+            if let Err(e) = fs::remove_file(spritesheet_path) {
+                eprintln!("Warning: Failed to remove temporary spritesheet: {e}");
+            }
         }
     }
 
     Ok(())
 }
 
-fn split_spritesheet(info: &SpriteExportInfo, output_dir: &Path) -> Result<(), String> {
+/// Extract individual frame images from a horizontal spritesheet.
+fn extract_frames(info: &SpriteExportInfo) -> Result<Vec<DynamicImage>, String> {
     let spritesheet_path = Path::new(&info.path);
 
     if !spritesheet_path.exists() {
         return Err(format!("Spritesheet not found: {}", info.path));
     }
 
-    // Load the spritesheet image (ensure we preserve alpha channel)
     let img = image::open(spritesheet_path)
         .map_err(|e| format!("Failed to load spritesheet: {e}"))?
         .into_rgba8();
-
-    // Convert back to DynamicImage to maintain alpha
     let img = DynamicImage::ImageRgba8(img);
 
     let sheet_width = img.width();
@@ -212,22 +284,17 @@ fn split_spritesheet(info: &SpriteExportInfo, output_dir: &Path) -> Result<(), S
     let frame_height = info.height;
     let frame_count = info.frame_count as usize;
 
-    // Calculate how many frames fit horizontally
     let frames_per_row = (sheet_width / frame_width) as usize;
     let num_rows = (sheet_height / frame_height) as usize;
 
-    // Extract individual frames
     let mut frames = Vec::new();
     for row in 0..num_rows {
         for col in 0..frames_per_row {
             if frames.len() >= frame_count {
                 break;
             }
-
             let x = col as u32 * frame_width;
             let y = row as u32 * frame_height;
-
-            // Crop the frame from the spritesheet
             let frame = img.crop_imm(x, y, frame_width, frame_height);
             frames.push(frame);
         }
@@ -236,26 +303,31 @@ fn split_spritesheet(info: &SpriteExportInfo, output_dir: &Path) -> Result<(), S
         }
     }
 
-    // Determine output filename (GIF for multiple frames, PNG for single)
+    if frames.is_empty() {
+        return Err("No frames extracted from spritesheet".to_string());
+    }
+
+    Ok(frames)
+}
+
+/// Save extracted frames as a GIF (multiple frames) or PNG (single frame).
+fn save_frames_as_output(
+    info: &SpriteExportInfo,
+    frames: &[DynamicImage],
+    output_dir: &Path,
+) -> Result<(), String> {
+    let spritesheet_path = Path::new(&info.path);
     let base_name = spritesheet_path
         .file_stem()
         .and_then(|s| s.to_str())
         .ok_or("Invalid spritesheet filename")?;
 
-    // Ensure we have at least one frame
-    if frames.is_empty() {
-        return Err("No frames extracted from spritesheet".to_string());
-    }
-
     let output_path = if frames.len() > 1 {
-        // Create animated GIF
         let gif_path = output_dir.join(format!("{base_name}.gif"));
-        create_gif(&frames, &gif_path, frame_width, frame_height)?;
+        create_gif(frames, &gif_path, info.width, info.height)?;
         gif_path
     } else {
-        // Save as PNG (preserve alpha channel)
         let png_path = output_dir.join(format!("{base_name}.png"));
-        // Ensure we save with alpha channel preserved
         let rgba_frame = frames[0].to_rgba8();
         rgba_frame
             .save(&png_path)
@@ -263,31 +335,11 @@ fn split_spritesheet(info: &SpriteExportInfo, output_dir: &Path) -> Result<(), S
         png_path
     };
 
-    // Remove the temporary spritesheet only if it's different from the output file
-    // (When there's only 1 frame, the spritesheet IS the output file, so don't delete it)
-    // Normalize paths for comparison (handle different separators, etc.)
-    let spritesheet_canonical = spritesheet_path.canonicalize().ok();
-    let output_canonical = output_path.canonicalize().ok();
-
-    // Only delete if paths are different (after canonicalization if possible)
-    let should_delete =
-        if let (Some(sheet), Some(out)) = (&spritesheet_canonical, &output_canonical) {
-            sheet != out
-        } else {
-            // If canonicalization failed, compare the original paths
-            spritesheet_path != output_path
-        };
-
-    if should_delete {
-        fs::remove_file(spritesheet_path)
-            .map_err(|e| format!("Failed to remove spritesheet: {e}"))?;
-    }
-
     println!(
         "Created: {} ({} frame{})",
         output_path.display(),
-        frame_count,
-        if frame_count > 1 { "s" } else { "" }
+        frames.len(),
+        if frames.len() > 1 { "s" } else { "" }
     );
 
     Ok(())
