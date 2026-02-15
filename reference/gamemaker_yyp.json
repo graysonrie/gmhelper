@@ -1,0 +1,37 @@
+{
+  "$GMProject":"v1",
+  "%Name":"spriteimporttest",
+  "AudioGroups":[
+    {"$GMAudioGroup":"v1","%Name":"audiogroup_default","exportDir":"","name":"audiogroup_default","resourceType":"GMAudioGroup","resourceVersion":"2.0","targets":-1}
+  ],
+  "configs":{
+    "children":[],
+    "name":"Default"
+  },
+  "defaultScriptType":0,
+  "Folders":[
+    {"$GMFolder":"","%Name":"Sprites","folderPath":"folders/Sprites.yy","name":"Sprites","resourceType":"GMFolder","resourceVersion":"2.0"},
+    {"$GMFolder":"","%Name":"NestedFolder","folderPath":"folders/Sprites/NestedFolder.yy","name":"NestedFolder","resourceType":"GMFolder","resourceVersion":"2.0"}
+  ],
+  "ForcedPrefabProjectReferences":[],
+  "IncludedFiles":[],
+  "isEcma":false,
+  "LibraryEmitters":[],
+  "MetaData":{
+    "IDEVersion":"2024.1400.2.941"
+  },
+  "name":"spriteimporttest",
+  "resources":[
+    {"id":{"name":"Room1","path":"rooms/Room1/Room1.yy"}},
+    {"id":{"name":"sSprite1","path":"sprites/sSprite1/sSprite1.yy"}}
+  ],
+  "resourceType":"GMProject",
+  "resourceVersion":"2.0",
+  "RoomOrderNodes":[
+    {"roomId":{"name":"Room1","path":"rooms/Room1/Room1.yy"}}
+  ],
+  "templateType":"game",
+  "TextureGroups":[
+    {"$GMTextureGroup":"","%Name":"Default","autocrop":true,"border":2,"compressFormat":"bz2","customOptions":"","directory":"","groupParent":null,"isScaled":true,"loadType":"default","mipsToGenerate":0,"name":"Default","resourceType":"GMTextureGroup","resourceVersion":"2.0","targets":-1}
+  ]
+}

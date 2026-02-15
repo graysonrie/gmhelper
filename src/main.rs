@@ -242,7 +242,12 @@ fn split_spritesheet(info: &SpriteExportInfo, output_dir: &Path) -> Result<(), S
         .and_then(|s| s.to_str())
         .ok_or("Invalid spritesheet filename")?;
 
-    let output_path = if frame_count > 1 {
+    // Ensure we have at least one frame
+    if frames.is_empty() {
+        return Err("No frames extracted from spritesheet".to_string());
+    }
+
+    let output_path = if frames.len() > 1 {
         // Create animated GIF
         let gif_path = output_dir.join(format!("{base_name}.gif"));
         create_gif(&frames, &gif_path, frame_width, frame_height)?;
@@ -258,8 +263,25 @@ fn split_spritesheet(info: &SpriteExportInfo, output_dir: &Path) -> Result<(), S
         png_path
     };
 
-    // Remove the temporary spritesheet
-    fs::remove_file(spritesheet_path).map_err(|e| format!("Failed to remove spritesheet: {e}"))?;
+    // Remove the temporary spritesheet only if it's different from the output file
+    // (When there's only 1 frame, the spritesheet IS the output file, so don't delete it)
+    // Normalize paths for comparison (handle different separators, etc.)
+    let spritesheet_canonical = spritesheet_path.canonicalize().ok();
+    let output_canonical = output_path.canonicalize().ok();
+
+    // Only delete if paths are different (after canonicalization if possible)
+    let should_delete =
+        if let (Some(sheet), Some(out)) = (&spritesheet_canonical, &output_canonical) {
+            sheet != out
+        } else {
+            // If canonicalization failed, compare the original paths
+            spritesheet_path != output_path
+        };
+
+    if should_delete {
+        fs::remove_file(spritesheet_path)
+            .map_err(|e| format!("Failed to remove spritesheet: {e}"))?;
+    }
 
     println!(
         "Created: {} ({} frame{})",
@@ -269,6 +291,32 @@ fn split_spritesheet(info: &SpriteExportInfo, output_dir: &Path) -> Result<(), S
     );
 
     Ok(())
+}
+
+// Helper function to find the nearest color in the palette using Euclidean distance
+fn find_nearest_color(color: [u8; 3], palette: &[[u8; 3]]) -> usize {
+    // If palette only has transparent marker (pure black), return it (shouldn't happen in practice)
+    if palette.len() <= 1 {
+        return 0;
+    }
+
+    let mut best_idx = 1; // Start at 1 to skip index 0 (transparent marker - pure black)
+    let mut best_dist = u32::MAX;
+
+    for (idx, &palette_color) in palette.iter().enumerate().skip(1) {
+        // Skip index 0 (transparent marker - pure black)
+        let dr = color[0] as i32 - palette_color[0] as i32;
+        let dg = color[1] as i32 - palette_color[1] as i32;
+        let db = color[2] as i32 - palette_color[2] as i32;
+        let dist = (dr * dr + dg * dg + db * db) as u32;
+
+        if dist < best_dist {
+            best_dist = dist;
+            best_idx = idx;
+        }
+    }
+
+    best_idx
 }
 
 fn create_gif(
@@ -289,12 +337,13 @@ fn create_gif(
         .map_err(|e| format!("Failed to create GIF file: {e}"))?;
 
     // Build a custom palette with transparent color at index 0
-    // Use RGB(1, 254, 1) - a very specific shade unlikely to appear in sprites
-    let transparent_marker = [1u8, 254u8, 1u8];
+    // Use pure black [0, 0, 0] as the transparent marker
+    // This means pure black cannot be used as an opaque color in sprites
+    let transparent_marker = [0u8, 0u8, 0u8];
 
     // Collect all unique opaque colors from all frames
     let mut color_map = std::collections::HashMap::new();
-    let mut color_list = vec![transparent_marker]; // Index 0 is transparent marker
+    let mut color_list = vec![transparent_marker]; // Index 0 is transparent marker (pure black)
 
     // First pass: collect all unique colors
     for frame_img in frames {
@@ -308,7 +357,8 @@ fn create_gif(
 
             if a > 0 {
                 let color = [r, g, b];
-                // Skip the transparent marker if it appears naturally (unlikely)
+                // Skip pure black (transparent marker) - it cannot be used as an opaque color
+                // This allows blue/cyan colors to work properly
                 if color != transparent_marker && !color_map.contains_key(&color) {
                     color_map.insert(color, color_list.len());
                     color_list.push(color);
@@ -335,6 +385,9 @@ fn create_gif(
             color_map.insert(*color, idx);
         }
     }
+
+    // Build palette array for nearest color lookup (skip index 0)
+    let palette_colors: Vec<[u8; 3]> = color_list.clone();
 
     let mut encoder = gif::Encoder::new(&mut file, width_u16, height_u16, &palette)
         .map_err(|e| format!("Failed to create GIF encoder: {e}"))?;
@@ -366,19 +419,16 @@ fn create_gif(
             } else {
                 // Opaque pixel - find color in palette
                 let color = [r, g, b];
-                let index = color_map.get(&color).copied().unwrap_or(0); // Fallback to transparent if color not in palette
+                let index = color_map.get(&color).copied().unwrap_or_else(|| {
+                    // If color not in palette, find nearest color instead of using transparent marker
+                    find_nearest_color(color, &palette_colors)
+                });
                 indexed_pixels.push(index as u8);
             }
         }
 
-        // Create frame from indexed pixels
-        // Note: from_palette_pixels requires the palette to be passed
-        // Since we're using a global palette in the encoder, we need to use a different method
-        // Let's use from_rgb and then manually set the palette indices
-        // Actually, the gif crate doesn't have a direct from_palette_pixels with global palette
-        // We need to use from_rgb and let it quantize, or build the frame differently
-
-        // Convert indexed pixels back to RGB for the frame (workaround)
+        // Convert indexed pixels back to RGB for the frame
+        // Index 0 will be converted to the transparent marker color, which will be marked as transparent
         let mut rgb_for_frame = Vec::new();
         for &idx in &indexed_pixels {
             let color_idx = idx as usize * 3;
@@ -387,7 +437,7 @@ fn create_gif(
                 rgb_for_frame.push(palette[color_idx + 1]);
                 rgb_for_frame.push(palette[color_idx + 2]);
             } else {
-                // Fallback to transparent marker
+                // Fallback to transparent marker (shouldn't happen with proper palette)
                 rgb_for_frame.push(transparent_marker[0]);
                 rgb_for_frame.push(transparent_marker[1]);
                 rgb_for_frame.push(transparent_marker[2]);
@@ -401,6 +451,7 @@ fn create_gif(
         frame.top = 0;
 
         // Set transparent color to index 0 (our transparent marker)
+        // This tells the GIF encoder that pixels with the color at index 0 should be transparent
         if has_transparent {
             frame.transparent = Some(0);
         }
