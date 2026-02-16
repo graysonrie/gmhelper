@@ -32,12 +32,19 @@ pub fn import_sprite_to_project(
     let mut project: serde_json::Value = serde_json::from_str(&yyp_clean)
         .map_err(|e| format!("Failed to parse .yyp JSON: {e}"))?;
 
-    // --- 2. Delete existing sprite folder if present (overwrite strategy) ---
+    // --- 2. Read overrides from existing sprite if dimensions match ---
     let sprite_dir = project_dir.join("sprites").join(sprite_name);
+    let overrides = read_sprite_overrides(&sprite_dir, sprite_name, width, height);
+
+    // Delete existing sprite folder (overwrite strategy)
     if sprite_dir.exists() {
         fs::remove_dir_all(&sprite_dir)
             .map_err(|e| format!("Failed to remove old sprite directory: {e}"))?;
-        println!("  Removed existing sprite: {}", sprite_dir.display());
+        if overrides.is_some() {
+            println!("  Overwriting sprite (preserving bbox/origin): {}", sprite_dir.display());
+        } else {
+            println!("  Removed existing sprite: {}", sprite_dir.display());
+        }
     }
 
     // --- 3. Generate UUIDs ---
@@ -94,7 +101,7 @@ pub fn import_sprite_to_project(
     };
 
     // --- 8. Build and write the .yy sprite model ---
-    let sprite_model = GMSpriteModel::new(
+    let mut sprite_model = GMSpriteModel::new(
         sprite_name,
         width as i32,
         height as i32,
@@ -103,6 +110,18 @@ pub fn import_sprite_to_project(
         parent_ref,
         bbox,
     );
+
+    // If the old sprite had the same dimensions, preserve its bbox/origin settings
+    if let Some(ov) = overrides {
+        sprite_model.bbox_mode = ov.bbox_mode;
+        sprite_model.bbox_bottom = ov.bbox_bottom;
+        sprite_model.bbox_left = ov.bbox_left;
+        sprite_model.bbox_right = ov.bbox_right;
+        sprite_model.bbox_top = ov.bbox_top;
+        sprite_model.origin = ov.origin;
+        sprite_model.sequence.xorigin = ov.xorigin;
+        sprite_model.sequence.yorigin = ov.yorigin;
+    }
 
     let yy_path = sprite_dir.join(format!("{sprite_name}.yy"));
     let yy_json = serde_json::to_string_pretty(&sprite_model)
@@ -247,6 +266,53 @@ pub fn derive_sprite_name(aseprite_path: &Path, tag_name: &str) -> Result<String
     let tag_part = to_camel_case(tag_name);
 
     Ok(format!("s{file_part}{tag_part}"))
+}
+
+/// Fields preserved from an existing sprite `.yy` when dimensions match.
+struct SpriteOverrides {
+    bbox_mode: i32,
+    bbox_bottom: i32,
+    bbox_left: i32,
+    bbox_right: i32,
+    bbox_top: i32,
+    origin: i32,
+    xorigin: i32,
+    yorigin: i32,
+}
+
+/// Try to read bbox and origin overrides from an existing sprite's `.yy` file.
+/// Returns `Some(overrides)` only if the file exists and its width/height match
+/// the new sprite dimensions, meaning the overrides are still valid.
+fn read_sprite_overrides(
+    sprite_dir: &Path,
+    sprite_name: &str,
+    new_width: u32,
+    new_height: u32,
+) -> Option<SpriteOverrides> {
+    let yy_path = sprite_dir.join(format!("{sprite_name}.yy"));
+    let content = fs::read_to_string(&yy_path).ok()?;
+    let clean = strip_trailing_commas(&content);
+    let val: serde_json::Value = serde_json::from_str(&clean).ok()?;
+
+    let old_width = val.get("width")?.as_i64()?;
+    let old_height = val.get("height")?.as_i64()?;
+
+    if old_width != new_width as i64 || old_height != new_height as i64 {
+        return None;
+    }
+
+    let seq = val.get("sequence")?;
+
+    Some(SpriteOverrides {
+        bbox_mode: val.get("bboxMode")?.as_i64()? as i32,
+        bbox_bottom: val.get("bbox_bottom")?.as_i64()? as i32,
+        bbox_left: val.get("bbox_left")?.as_i64()? as i32,
+        bbox_right: val.get("bbox_right")?.as_i64()? as i32,
+        bbox_top: val.get("bbox_top")?.as_i64()? as i32,
+        origin: val.get("origin")?.as_i64()? as i32,
+        xorigin: seq.get("xorigin")?.as_i64()? as i32,
+        yorigin: seq.get("yorigin")?.as_i64()? as i32,
+    })
 }
 
 /// Remove trailing commas from JSON text (commas before `]` or `}`).
