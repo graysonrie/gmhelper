@@ -95,7 +95,8 @@ pub fn export_production_wav_file(
     if fade_duration_secs > input_duration {
         return Err(format!(
             "Fade duration ({fade_duration_secs}s) is longer than a single loop ({input_duration}s)"
-        ).into());
+        )
+        .into());
     }
 
     let delay_ms = (lead_in_silence_secs * 1000.0) as u32;
@@ -188,9 +189,12 @@ pub fn export_production_mp4(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let probe = std::process::Command::new("ffprobe")
         .args([
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "csv=p=0",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "csv=p=0",
             production_wav_path,
         ])
         .output()?;
@@ -205,15 +209,24 @@ pub fn export_production_mp4(
     let output = std::process::Command::new("ffmpeg")
         .args([
             "-y",
-            "-loop", "1",
-            "-i", video_image_path,
-            "-i", production_wav_path,
-            "-c:v", "libx264",
-            "-tune", "stillimage",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-pix_fmt", "yuv420p",
-            "-t", &duration,
+            "-loop",
+            "1",
+            "-i",
+            video_image_path,
+            "-i",
+            production_wav_path,
+            "-c:v",
+            "libx264",
+            "-tune",
+            "stillimage",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-pix_fmt",
+            "yuv420p",
+            "-t",
+            &duration,
             output_mp4_path,
         ])
         .output()?;

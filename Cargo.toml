@@ -10,6 +10,7 @@ serde = { "version" = "1.0.228", "features" = ["derive"] }
 serde_json = { "version" = "1.0.145", "features" = ["preserve_order"] }
 image = "0.25"
 gif = "0.13"
+ost_export = { path = "crates/ost_export" }
 
 [dependencies.uuid]
 version = "1.10.0"

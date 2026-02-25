@@ -1,6 +1,8 @@
 use std::path::Path;
 mod operations;
 use operations::*;
+mod api;
+mod util;
 
 fn main() {
     let input = "C:\\Users\\grays\\Downloads\\test.wav";
