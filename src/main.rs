@@ -1,6 +1,6 @@
 mod sprites;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use image::DynamicImage;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
@@ -9,42 +9,64 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
 
-// Embed the Lua script in the binary
 const EXPORT_TAGS_SCRIPT: &str = include_str!("../lua/export_tags.lua");
 
 #[derive(Parser)]
 #[command(name = "gmhelper")]
-#[command(about = "Watches a directory for .aseprite file changes and exports tagged frames", long_about = None)]
-struct Args {
-    /// Directory to watch for .aseprite files
-    #[arg(short, long, value_name = "DIRECTORY")]
-    directory: Option<PathBuf>,
+#[command(about = "GameMaker helper tools: sprite watcher & music exporter")]
+struct Cli {
+    #[command(subcommand)]
+    command: SubCmd,
+}
 
-    /// Start watching the current working directory
-    #[arg(short, long)]
-    start: bool,
+#[derive(Subcommand)]
+enum SubCmd {
+    /// Watch a directory for .aseprite file changes and export tagged frames
+    Sprites {
+        /// Directory to watch for .aseprite files
+        #[arg(short, long, value_name = "DIRECTORY")]
+        directory: Option<PathBuf>,
 
-    /// Path to a GameMaker .yyp project file. When set, exported frames are
-    /// imported directly into the project instead of being saved as GIF/PNG.
-    #[arg(short, long, value_name = "YYP_FILE")]
-    project: Option<PathBuf>,
+        /// Start watching the current working directory
+        #[arg(short, long)]
+        start: bool,
+
+        /// Path to a GameMaker .yyp project file. When set, exported frames are
+        /// imported directly into the project instead of being saved as GIF/PNG.
+        #[arg(short, long, value_name = "YYP_FILE")]
+        project: Option<PathBuf>,
+    },
+
+    /// Export WAV files from a music/ folder in the cwd as GameMaker-ready OGG files
+    Music,
 }
 
 fn main() {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    // Determine which directory to watch
-    let watch_directory = if args.start {
-        // Use current working directory
+    match cli.command {
+        SubCmd::Sprites {
+            directory,
+            start,
+            project,
+        } => run_sprites(directory, start, project),
+        SubCmd::Music => run_music(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sprites subcommand
+// ---------------------------------------------------------------------------
+
+fn run_sprites(directory: Option<PathBuf>, start: bool, project: Option<PathBuf>) {
+    let watch_directory = if start {
         std::env::current_dir().unwrap_or_else(|e| {
             eprintln!("Error: Failed to get current directory: {e}");
             std::process::exit(1);
         })
-    } else if let Some(dir) = args.directory {
-        // Use specified directory
+    } else if let Some(dir) = directory {
         dir
     } else {
-        // Default to current working directory if neither flag is provided
         std::env::current_dir().unwrap_or_else(|e| {
             eprintln!("Error: Failed to get current directory: {e}");
             eprintln!("Hint: Use --directory <path> or --start to specify a directory");
@@ -52,7 +74,6 @@ fn main() {
         })
     };
 
-    // Verify directory exists
     if !watch_directory.exists() {
         eprintln!(
             "Error: Directory '{}' does not exist",
@@ -66,8 +87,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Validate the --project flag if provided
-    let project_path = args.project.map(|p| {
+    let project_path = project.inspect(|p| {
         if !p.exists() {
             eprintln!("Error: Project file '{}' does not exist", p.display());
             std::process::exit(1);
@@ -82,10 +102,8 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        p
     });
 
-    // Ensure the export script is available and get its path
     let script_path = ensure_script_available().unwrap_or_else(|e| {
         eprintln!("Error: Failed to set up export script: {e}");
         std::process::exit(1);
@@ -97,19 +115,15 @@ fn main() {
     }
     println!("Press Ctrl+C to stop...\n");
 
-    // Create a channel to receive events
     let (tx, rx) = mpsc::channel();
 
-    // Create a watcher object
     let mut watcher =
         RecommendedWatcher::new(tx, Config::default()).expect("Failed to create file watcher");
 
-    // Watch the directory recursively
     watcher
         .watch(&watch_directory, RecursiveMode::Recursive)
         .expect("Failed to watch directory");
 
-    // Process events
     loop {
         match rx.recv() {
             Ok(Ok(event)) => {
@@ -137,6 +151,36 @@ fn main() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Music subcommand
+// ---------------------------------------------------------------------------
+
+fn run_music() {
+    let cwd = std::env::current_dir().unwrap_or_else(|e| {
+        eprintln!("Error: Failed to get current directory: {e}");
+        std::process::exit(1);
+    });
+
+    println!("Exporting game music from: {}", cwd.display());
+
+    let options = ost_export::GameMusicExportOptions::famitracker_defaults();
+
+    match ost_export::export_as_game_music(&cwd, &options) {
+        Ok(result) => println!(
+            "Music export complete. Exported {} files.",
+            result.num_files_exported
+        ),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sprite export internals (unchanged)
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Deserialize)]
 struct SpriteExportInfo {
     path: String,
@@ -152,18 +196,14 @@ fn export_tags(
     project_path: Option<&Path>,
     watch_dir: &Path,
 ) -> Result<(), String> {
-    // Get the output directory (same as the .aseprite file)
     let output_dir = aseprite_path
         .parent()
         .ok_or_else(|| "Could not get parent directory".to_string())?;
 
     let file_path_str = aseprite_path.to_str().ok_or("Invalid file path")?;
-
     let output_dir_str = output_dir.to_str().ok_or("Invalid output directory path")?;
-
     let script_path_str = script_path.to_str().ok_or("Invalid script path")?;
 
-    // Invoke Aseprite with the export script
     let output = Command::new("aseprite")
         .arg("-b")
         .arg("-script-param")
@@ -177,12 +217,10 @@ fn export_tags(
             format!("Failed to execute Aseprite: {e}. Make sure 'aseprite' is in your PATH.")
         })?;
 
-    // Print stdout (Aseprite's JSON output)
     if !output.stdout.is_empty() {
         print!("{}", String::from_utf8_lossy(&output.stdout));
     }
 
-    // Parse JSON_EXPORT lines from stderr (where Lua outputs them)
     let stderr_str = String::from_utf8_lossy(&output.stderr);
     let mut export_infos = Vec::new();
 
@@ -197,7 +235,6 @@ fn export_tags(
                 }
             }
         } else if !line.trim().is_empty() {
-            // Print other stderr output (but not empty lines)
             eprintln!("{line}");
         }
     }
@@ -209,7 +246,6 @@ fn export_tags(
         ));
     }
 
-    // Process each exported spritesheet
     if export_infos.is_empty() {
         eprintln!(
             "Warning: No export info received from Lua script. Check if JSON_EXPORT lines are being output."
@@ -230,11 +266,9 @@ fn export_tags(
         };
 
         if let Some(yyp) = project_path {
-            // GameMaker import path
             let sprite_name =
                 sprites::gm_import::derive_sprite_name(aseprite_path, &info.tag_name)?;
-            let gm_folder =
-                sprites::gm_import::compute_gm_folder_path(watch_dir, aseprite_path);
+            let gm_folder = sprites::gm_import::compute_gm_folder_path(watch_dir, aseprite_path);
 
             if let Err(e) = sprites::gm_import::import_sprite_to_project(
                 yyp,
@@ -246,14 +280,10 @@ fn export_tags(
             ) {
                 eprintln!("Error importing sprite to GM project: {e}");
             }
-        } else {
-            // Normal GIF/PNG export path
-            if let Err(e) = save_frames_as_output(info, &frames, output_dir) {
-                eprintln!("Error saving output for {}: {e}", info.path);
-            }
+        } else if let Err(e) = save_frames_as_output(info, &frames, output_dir) {
+            eprintln!("Error saving output for {}: {e}", info.path);
         }
 
-        // Clean up the temporary spritesheet
         let spritesheet_path = Path::new(&info.path);
         if spritesheet_path.exists() {
             if let Err(e) = fs::remove_file(spritesheet_path) {
@@ -265,7 +295,6 @@ fn export_tags(
     Ok(())
 }
 
-/// Extract individual frame images from a horizontal spritesheet.
 fn extract_frames(info: &SpriteExportInfo) -> Result<Vec<DynamicImage>, String> {
     let spritesheet_path = Path::new(&info.path);
 
@@ -310,7 +339,6 @@ fn extract_frames(info: &SpriteExportInfo) -> Result<Vec<DynamicImage>, String> 
     Ok(frames)
 }
 
-/// Save extracted frames as a GIF (multiple frames) or PNG (single frame).
 fn save_frames_as_output(
     info: &SpriteExportInfo,
     frames: &[DynamicImage],
@@ -345,18 +373,15 @@ fn save_frames_as_output(
     Ok(())
 }
 
-// Helper function to find the nearest color in the palette using Euclidean distance
 fn find_nearest_color(color: [u8; 3], palette: &[[u8; 3]]) -> usize {
-    // If palette only has transparent marker (pure black), return it (shouldn't happen in practice)
     if palette.len() <= 1 {
         return 0;
     }
 
-    let mut best_idx = 1; // Start at 1 to skip index 0 (transparent marker - pure black)
+    let mut best_idx = 1;
     let mut best_dist = u32::MAX;
 
     for (idx, &palette_color) in palette.iter().enumerate().skip(1) {
-        // Skip index 0 (transparent marker - pure black)
         let dr = color[0] as i32 - palette_color[0] as i32;
         let dg = color[1] as i32 - palette_color[1] as i32;
         let db = color[2] as i32 - palette_color[2] as i32;
@@ -377,7 +402,6 @@ fn create_gif(
     width: u32,
     height: u32,
 ) -> Result<(), String> {
-    // Convert u32 to u16 for GIF encoder (GIF format limitation)
     let width_u16 = width
         .try_into()
         .map_err(|_| format!("Width {width} exceeds GIF limit (65535)"))?;
@@ -388,16 +412,11 @@ fn create_gif(
     let mut file = std::fs::File::create(output_path)
         .map_err(|e| format!("Failed to create GIF file: {e}"))?;
 
-    // Build a custom palette with transparent color at index 0
-    // Use pure black [0, 0, 0] as the transparent marker
-    // This means pure black cannot be used as an opaque color in sprites
     let transparent_marker = [0u8, 0u8, 0u8];
 
-    // Collect all unique opaque colors from all frames
     let mut color_map = std::collections::HashMap::new();
-    let mut color_list = vec![transparent_marker]; // Index 0 is transparent marker (pure black)
+    let mut color_list = vec![transparent_marker];
 
-    // First pass: collect all unique colors
     for frame_img in frames {
         let rgba_img = frame_img.to_rgba8();
         let pixels = rgba_img.as_raw();
@@ -409,8 +428,6 @@ fn create_gif(
 
             if a > 0 {
                 let color = [r, g, b];
-                // Skip pure black (transparent marker) - it cannot be used as an opaque color
-                // This allows blue/cyan colors to work properly
                 if color != transparent_marker && !color_map.contains_key(&color) {
                     color_map.insert(color, color_list.len());
                     color_list.push(color);
@@ -419,7 +436,6 @@ fn create_gif(
         }
     }
 
-    // Build palette (RGB triplets)
     let mut palette = Vec::new();
     for color in &color_list {
         palette.push(color[0]);
@@ -427,34 +443,28 @@ fn create_gif(
         palette.push(color[2]);
     }
 
-    // Limit to 256 colors (GIF limitation)
     if palette.len() > 768 {
         palette.truncate(768);
         color_list.truncate(256);
-        // Rebuild color_map with truncated colors
         color_map.clear();
         for (idx, color) in color_list.iter().enumerate() {
             color_map.insert(*color, idx);
         }
     }
 
-    // Build palette array for nearest color lookup (skip index 0)
     let palette_colors: Vec<[u8; 3]> = color_list.clone();
 
     let mut encoder = gif::Encoder::new(&mut file, width_u16, height_u16, &palette)
         .map_err(|e| format!("Failed to create GIF encoder: {e}"))?;
 
-    // Set repeat to infinite
     encoder
         .set_repeat(gif::Repeat::Infinite)
         .map_err(|e| format!("Failed to set GIF repeat: {e}"))?;
 
-    // Process frames and convert to palette indices
     for frame_img in frames {
         let rgba_img = frame_img.to_rgba8();
         let pixels = rgba_img.as_raw();
 
-        // Convert to palette indices
         let mut indexed_pixels = Vec::new();
         let mut has_transparent = false;
 
@@ -465,22 +475,18 @@ fn create_gif(
             let a = chunk[3];
 
             if a == 0 {
-                // Transparent pixel - use index 0 (transparent marker)
                 indexed_pixels.push(0);
                 has_transparent = true;
             } else {
-                // Opaque pixel - find color in palette
                 let color = [r, g, b];
-                let index = color_map.get(&color).copied().unwrap_or_else(|| {
-                    // If color not in palette, find nearest color instead of using transparent marker
-                    find_nearest_color(color, &palette_colors)
-                });
+                let index = color_map
+                    .get(&color)
+                    .copied()
+                    .unwrap_or_else(|| find_nearest_color(color, &palette_colors));
                 indexed_pixels.push(index as u8);
             }
         }
 
-        // Convert indexed pixels back to RGB for the frame
-        // Index 0 will be converted to the transparent marker color, which will be marked as transparent
         let mut rgb_for_frame = Vec::new();
         for &idx in &indexed_pixels {
             let color_idx = idx as usize * 3;
@@ -489,7 +495,6 @@ fn create_gif(
                 rgb_for_frame.push(palette[color_idx + 1]);
                 rgb_for_frame.push(palette[color_idx + 2]);
             } else {
-                // Fallback to transparent marker (shouldn't happen with proper palette)
                 rgb_for_frame.push(transparent_marker[0]);
                 rgb_for_frame.push(transparent_marker[1]);
                 rgb_for_frame.push(transparent_marker[2]);
@@ -497,13 +502,11 @@ fn create_gif(
         }
 
         let mut frame = gif::Frame::from_rgb(width_u16, height_u16, &rgb_for_frame);
-        frame.delay = 10; // 100ms delay
+        frame.delay = 10;
         frame.dispose = gif::DisposalMethod::Background;
         frame.left = 0;
         frame.top = 0;
 
-        // Set transparent color to index 0 (our transparent marker)
-        // This tells the GIF encoder that pixels with the color at index 0 should be transparent
         if has_transparent {
             frame.transparent = Some(0);
         }
@@ -517,26 +520,21 @@ fn create_gif(
 }
 
 fn ensure_script_available() -> Result<PathBuf, String> {
-    // First, try to find an existing script in the project directory (for development)
     let dev_script = Path::new("lua/export_tags.lua");
     if dev_script.exists() {
         return Ok(dev_script.to_path_buf());
     }
 
-    // Get the executable directory
     let exe_path =
         std::env::current_exe().map_err(|e| format!("Failed to get executable path: {e}"))?;
     let exe_dir = exe_path
         .parent()
         .ok_or_else(|| "Could not get executable directory".to_string())?;
 
-    // Create a scripts directory next to the executable
     let scripts_dir = exe_dir.join("lua");
     let script_path = scripts_dir.join("export_tags.lua");
 
-    // If the script already exists and matches, use it
     if script_path.exists() {
-        // Optionally verify the content matches (for updates)
         if let Ok(existing_content) = fs::read_to_string(&script_path) {
             if existing_content == EXPORT_TAGS_SCRIPT {
                 return Ok(script_path);
@@ -544,7 +542,6 @@ fn ensure_script_available() -> Result<PathBuf, String> {
         }
     }
 
-    // Create the scripts directory if it doesn't exist
     fs::create_dir_all(&scripts_dir).map_err(|e| {
         format!(
             "Failed to create scripts directory at {}: {e}",
@@ -552,7 +549,6 @@ fn ensure_script_available() -> Result<PathBuf, String> {
         )
     })?;
 
-    // Write the embedded script to the file
     fs::write(&script_path, EXPORT_TAGS_SCRIPT)
         .map_err(|e| format!("Failed to write script to {}: {e}", script_path.display()))?;
 
