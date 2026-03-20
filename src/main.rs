@@ -1,12 +1,8 @@
 mod sprites;
 
 use clap::{Parser, Subcommand};
-use image::DynamicImage;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use serde::Deserialize;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::aseprite_exporter::{ensure_script_available, export_tags};
@@ -34,11 +30,6 @@ enum SubCmd {
         /// Start watching the current working directory
         #[arg(short, long)]
         start: bool,
-
-        /// Path to a GameMaker .yyp project file. When set, exported frames are
-        /// imported directly into the project instead of being saved as GIF/PNG.
-        #[arg(short, long, value_name = "YYP_FILE")]
-        project: Option<PathBuf>,
     },
 
     /// Export WAV files from a music/ folder in the cwd as GameMaker-ready OGG files
@@ -49,11 +40,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        SubCmd::Sprites {
-            directory,
-            start,
-            project,
-        } => run_sprites(directory, start, project),
+        SubCmd::Sprites { directory, start } => run_sprites(directory, start),
         SubCmd::Music => run_music(),
     }
 }
@@ -62,7 +49,7 @@ fn main() {
 // Sprites subcommand
 // ---------------------------------------------------------------------------
 
-fn run_sprites(directory: Option<PathBuf>, start: bool, project: Option<PathBuf>) {
+fn run_sprites(directory: Option<PathBuf>, start: bool) {
     let watch_directory = if start {
         std::env::current_dir().unwrap_or_else(|e| {
             eprintln!("Error: Failed to get current directory: {e}");
@@ -91,32 +78,12 @@ fn run_sprites(directory: Option<PathBuf>, start: bool, project: Option<PathBuf>
         std::process::exit(1);
     }
 
-    let project_path = project.inspect(|p| {
-        if !p.exists() {
-            eprintln!("Error: Project file '{}' does not exist", p.display());
-            std::process::exit(1);
-        }
-        match p.extension().and_then(|e| e.to_str()) {
-            Some("yyp") => {}
-            _ => {
-                eprintln!(
-                    "Error: '{}' is not a .yyp file. Provide a valid GameMaker project file.",
-                    p.display()
-                );
-                std::process::exit(1);
-            }
-        }
-    });
-
     let script_path = ensure_script_available().unwrap_or_else(|e| {
         eprintln!("Error: Failed to set up export script: {e}");
         std::process::exit(1);
     });
 
     println!("Watching directory: {}", watch_directory.display());
-    if let Some(ref pp) = project_path {
-        println!("GameMaker project: {}", pp.display());
-    }
     println!("Press Ctrl+C to stop...\n");
 
     let (tx, rx) = mpsc::channel();
@@ -136,12 +103,7 @@ fn run_sprites(directory: Option<PathBuf>, start: bool, project: Option<PathBuf>
                         if let Some(ext) = path.extension() {
                             if ext == "aseprite" && path.exists() {
                                 println!("Processing: {}", path.display());
-                                if let Err(e) = export_tags(
-                                    &path,
-                                    &script_path,
-                                    project_path.as_deref(),
-                                    &watch_directory,
-                                ) {
+                                if let Err(e) = export_tags(&path, &script_path) {
                                     eprintln!("Error exporting {}: {}", path.display(), e);
                                 }
                             }

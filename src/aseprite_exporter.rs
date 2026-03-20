@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{EXPORT_TAGS_SCRIPT, sprites};
+use crate::EXPORT_TAGS_SCRIPT;
 
 // ---------------------------------------------------------------------------
 // Sprite export internals (unchanged)
@@ -16,14 +16,11 @@ struct SpriteExportInfo {
     width: u32,
     height: u32,
     frame_count: u32,
-    tag_name: String,
 }
 
 pub fn export_tags(
     aseprite_path: &Path,
     script_path: &Path,
-    project_path: Option<&Path>,
-    watch_dir: &Path,
 ) -> Result<(), String> {
     let output_dir = aseprite_path
         .parent()
@@ -94,28 +91,13 @@ pub fn export_tags(
             }
         };
 
-        if let Some(yyp) = project_path {
-            let sprite_name =
-                sprites::gm_import::derive_sprite_name(aseprite_path, &info.tag_name)?;
-            let gm_folder = sprites::gm_import::compute_gm_folder_path(watch_dir, aseprite_path);
-
-            if let Err(e) = sprites::gm_import::import_sprite_to_project(
-                yyp,
-                &sprite_name,
-                &frames,
-                &gm_folder,
-                info.width,
-                info.height,
-            ) {
-                eprintln!("Error importing sprite to GM project: {e}");
-            }
-        } else if let Err(e) = save_frames_as_output(info, &frames, output_dir) {
+        if let Err(e) = save_frames_as_output(info, &frames, output_dir) {
             eprintln!("Error saving output for {}: {e}", info.path);
         }
 
         // In normal export mode, a single-frame tag keeps the original PNG path
         // as its final output. Do not delete it during cleanup.
-        let should_delete_spritesheet = project_path.is_some() || frames.len() > 1;
+        let should_delete_spritesheet = frames.len() > 1;
         if should_delete_spritesheet {
             let spritesheet_path = Path::new(&info.path);
             if spritesheet_path.exists() {
