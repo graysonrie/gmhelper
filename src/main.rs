@@ -7,6 +7,7 @@ use std::sync::mpsc;
 
 use crate::aseprite_exporter::{ensure_script_available, export_tags};
 
+mod hot_reloader;
 mod aseprite_exporter;
 
 const EXPORT_TAGS_SCRIPT: &str = include_str!("../lua/export_tags.lua");
