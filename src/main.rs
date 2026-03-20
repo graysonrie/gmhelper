@@ -35,6 +35,13 @@ enum SubCmd {
 
     /// Export WAV files from a music/ folder in the cwd as GameMaker-ready OGG files
     Music,
+
+    /// Hot-reload: watch .gml files and rebuild + relaunch the game on changes
+    Reload {
+        /// Path to the GameMaker .yyp project file
+        #[arg(value_name = "YYP_FILE")]
+        project: PathBuf,
+    },
 }
 
 fn main() {
@@ -43,6 +50,7 @@ fn main() {
     match cli.command {
         SubCmd::Sprites { directory, start } => run_sprites(directory, start),
         SubCmd::Music => run_music(),
+        SubCmd::Reload { project } => hot_reloader::run_reload(project),
     }
 }
 
