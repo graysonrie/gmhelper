@@ -5,6 +5,11 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+unsafe extern "system" {
+    fn GetForegroundWindow() -> isize;
+    fn SetForegroundWindow(hwnd: isize) -> i32;
+}
+
 const IGOR_PATH: &str = r"C:\ProgramData\GameMakerStudio2-Beta\Cache\runtimes\runtime-2024.1400.4.968\bin\igor\windows\x64\Igor.exe";
 const BUILD_BFF_PATH: &str = r"C:\Users\grays\AppData\Local\GameMakerStudio2-Beta\GMS2TEMP\build.bff";
 const RUNNER_EXE: &str = "Runner.exe";
@@ -104,6 +109,8 @@ fn kill_runner() {
 }
 
 fn build_and_run(yyp_path: &Path) {
+    let saved_hwnd = unsafe { GetForegroundWindow() };
+
     let options_arg = format!("-options={BUILD_BFF_PATH}");
 
     let result = Command::new(IGOR_PATH)
@@ -117,13 +124,35 @@ fn build_and_run(yyp_path: &Path) {
         .spawn();
 
     match result {
-        Ok(_) => println!(
-            "  Build + run launched for {}",
-            yyp_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-        ),
+        Ok(_) => {
+            println!(
+                "  Build + run launched for {}",
+                yyp_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            );
+
+            // Prevent Runner.exe from stealing focus: poll until the foreground
+            // window changes (Runner appeared), then immediately restore the
+            // original window.
+            if saved_hwnd != 0 {
+                std::thread::spawn(move || {
+                    let timeout = Duration::from_secs(15);
+                    let start = Instant::now();
+                    while start.elapsed() < timeout {
+                        std::thread::sleep(Duration::from_millis(500));
+                        let current = unsafe { GetForegroundWindow() };
+                        if current != saved_hwnd {
+                            unsafe {
+                                SetForegroundWindow(saved_hwnd);
+                            }
+                            break;
+                        }
+                    }
+                });
+            }
+        }
         Err(e) => eprintln!("  Error: Failed to launch Igor.exe: {e}"),
     }
 }
