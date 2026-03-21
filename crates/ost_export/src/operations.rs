@@ -1,3 +1,7 @@
+pub struct TrimWavResult {
+    pub new_duration_secs: f64,
+}
+
 /// Trims a WAV file from the start and end
 /// # Arguments
 /// * `input_path` - The path to the input WAV file
@@ -12,7 +16,7 @@ pub fn trim_wav(
     output_path: &str,
     trim_start_secs: f64,
     trim_end_secs: f64,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<TrimWavResult, Box<dyn std::error::Error>> {
     let reader = hound::WavReader::open(input_path)?;
     let spec = reader.spec();
 
@@ -38,7 +42,9 @@ pub fn trim_wav(
     }
     writer.finalize()?;
 
-    Ok(())
+    Ok(TrimWavResult {
+        new_duration_secs: (total - skip_start - skip_end) as f64 / samples_per_second,
+    })
 }
 
 pub fn wav_to_ogg(input_path: &str, output_path: &str) -> Result<(), Box<dyn std::error::Error>> {

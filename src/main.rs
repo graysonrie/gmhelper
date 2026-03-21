@@ -2,13 +2,14 @@ mod sprites;
 
 use clap::{Parser, Subcommand};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use ost_export::Mp4ExportOptions;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::aseprite_exporter::{ensure_script_available, export_tags};
 
-mod hot_reloader;
 mod aseprite_exporter;
+mod hot_reloader;
 
 const EXPORT_TAGS_SCRIPT: &str = include_str!("../lua/export_tags.lua");
 
@@ -34,7 +35,16 @@ enum SubCmd {
     },
 
     /// Export WAV files from a music/ folder in the cwd as GameMaker-ready OGG files
-    Music,
+    Music {
+        #[arg(short, long)]
+        mp4: bool,
+
+        #[arg(short, long, value_name = "GAME_NAME")]
+        game_name: Option<String>,
+
+        #[arg(short, long, value_name = "IMAGE_PATH")]
+        image_path: Option<String>,
+    },
 
     /// Hot-reload: watch .gml files and rebuild + relaunch the game on changes
     Reload {
@@ -49,7 +59,11 @@ fn main() {
 
     match cli.command {
         SubCmd::Sprites { directory, start } => run_sprites(directory, start),
-        SubCmd::Music => run_music(),
+        SubCmd::Music {
+            mp4,
+            game_name,
+            image_path,
+        } => run_music(mp4, game_name, image_path),
         SubCmd::Reload { project } => hot_reloader::run_reload(project),
     }
 }
@@ -130,24 +144,42 @@ fn run_sprites(directory: Option<PathBuf>, start: bool) {
 // Music subcommand
 // ---------------------------------------------------------------------------
 
-fn run_music() {
+fn run_music(mp4: bool, game_name: Option<String>, image_path: Option<String>) {
     let cwd = std::env::current_dir().unwrap_or_else(|e| {
         eprintln!("Error: Failed to get current directory: {e}");
         std::process::exit(1);
     });
 
-    println!("Exporting game music from: {}", cwd.display());
-
     let options = ost_export::GameMusicExportOptions::famitracker_defaults();
+    if mp4 {
+        println!("Exporting game music from: {} as MP4 files", cwd.display());
 
-    match ost_export::export_as_game_music(&cwd, &options) {
-        Ok(result) => println!(
-            "Music export complete. Exported {} files.",
-            result.num_files_exported
-        ),
-        Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
+        let game_title = game_name.expect("You must provide a game_name if exporting mp4");
+        let video_image_path = image_path.expect("You must provide a image_path if exporting mp4");
+        let mp4_options = Mp4ExportOptions::defaults(&video_image_path, &game_title);
+
+        match ost_export::export_as_mp4_files(&cwd, &options, &mp4_options) {
+            Ok(result) => println!(
+                "MP4 export complete. Exported {} files.",
+                result.num_files_exported
+            ),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        println!("Exporting game music from: {}", cwd.display());
+
+        match ost_export::export_as_game_music(&cwd, &options) {
+            Ok(result) => println!(
+                "Music export complete. Exported {} files.",
+                result.num_files_exported
+            ),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
     }
 }
