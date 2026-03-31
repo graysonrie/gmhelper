@@ -10,6 +10,7 @@ use crate::aseprite_exporter::{ensure_script_available, export_tags};
 
 mod aseprite_exporter;
 mod hot_reloader;
+mod code_editor;
 
 const EXPORT_TAGS_SCRIPT: &str = include_str!("../lua/export_tags.lua");
 
@@ -123,12 +124,13 @@ fn run_sprites(directory: Option<PathBuf>, start: bool) {
             Ok(Ok(event)) => {
                 if let EventKind::Modify(_) | EventKind::Create(_) = event.kind {
                     for path in event.paths {
-                        if let Some(ext) = path.extension() {
-                            if ext == "aseprite" && path.exists() {
-                                println!("Processing: {}", path.display());
-                                if let Err(e) = export_tags(&path, &script_path) {
-                                    eprintln!("Error exporting {}: {}", path.display(), e);
-                                }
+                        if let Some(ext) = path.extension()
+                            && ext == "aseprite"
+                            && path.exists()
+                        {
+                            println!("Processing: {}", path.display());
+                            if let Err(e) = export_tags(&path, &script_path) {
+                                eprintln!("Error exporting {}: {}", path.display(), e);
                             }
                         }
                     }

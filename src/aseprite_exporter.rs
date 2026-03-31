@@ -18,10 +18,7 @@ struct SpriteExportInfo {
     frame_count: u32,
 }
 
-pub fn export_tags(
-    aseprite_path: &Path,
-    script_path: &Path,
-) -> Result<(), String> {
+pub fn export_tags(aseprite_path: &Path, script_path: &Path) -> Result<(), String> {
     let output_dir = aseprite_path
         .parent()
         .ok_or_else(|| "Could not get parent directory".to_string())?;
@@ -100,10 +97,10 @@ pub fn export_tags(
         let should_delete_spritesheet = frames.len() > 1;
         if should_delete_spritesheet {
             let spritesheet_path = Path::new(&info.path);
-            if spritesheet_path.exists() {
-                if let Err(e) = fs::remove_file(spritesheet_path) {
-                    eprintln!("Warning: Failed to remove temporary spritesheet: {e}");
-                }
+            if spritesheet_path.exists()
+                && let Err(e) = fs::remove_file(spritesheet_path)
+            {
+                eprintln!("Warning: Failed to remove temporary spritesheet: {e}");
             }
         }
     }
@@ -350,12 +347,11 @@ pub fn ensure_script_available() -> Result<PathBuf, String> {
     let scripts_dir = exe_dir.join("lua");
     let script_path = scripts_dir.join("export_tags.lua");
 
-    if script_path.exists() {
-        if let Ok(existing_content) = fs::read_to_string(&script_path) {
-            if existing_content == EXPORT_TAGS_SCRIPT {
-                return Ok(script_path);
-            }
-        }
+    if script_path.exists()
+        && let Ok(existing_content) = fs::read_to_string(&script_path)
+        && existing_content == EXPORT_TAGS_SCRIPT
+    {
+        return Ok(script_path);
     }
 
     fs::create_dir_all(&scripts_dir).map_err(|e| {

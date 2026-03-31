@@ -5,13 +5,16 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use crate::code_editor;
+
 unsafe extern "system" {
     fn GetForegroundWindow() -> isize;
     fn SetForegroundWindow(hwnd: isize) -> i32;
 }
 
 const IGOR_PATH: &str = r"C:\ProgramData\GameMakerStudio2-Beta\Cache\runtimes\runtime-2024.1400.4.968\bin\igor\windows\x64\Igor.exe";
-const BUILD_BFF_PATH: &str = r"C:\Users\grays\AppData\Local\GameMakerStudio2-Beta\GMS2TEMP\build.bff";
+const BUILD_BFF_PATH: &str =
+    r"C:\Users\grays\AppData\Local\GameMakerStudio2-Beta\GMS2TEMP\build.bff";
 const RUNNER_EXE: &str = "Runner.exe";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DEBOUNCE: Duration = Duration::from_secs(1);
@@ -19,7 +22,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 pub fn run_reload(yyp_path: PathBuf) {
     if !yyp_path.exists() {
-        eprintln!("Error: Project file '{}' does not exist", yyp_path.display());
+        eprintln!(
+            "Error: Project file '{}' does not exist",
+            yyp_path.display()
+        );
         std::process::exit(1);
     }
 
@@ -62,14 +68,18 @@ pub fn run_reload(yyp_path: PathBuf) {
         match rx.recv_timeout(POLL_INTERVAL) {
             Ok(Ok(event)) => {
                 if let EventKind::Modify(_) | EventKind::Create(_) = event.kind {
-                    let has_gml = event
+                    let gml_paths: Vec<&PathBuf> = event
                         .paths
                         .iter()
-                        .any(|p| p.extension().and_then(|e| e.to_str()) == Some("gml"));
+                        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("gml"))
+                        .collect();
 
-                    if has_gml {
+                    if !gml_paths.is_empty() {
                         pending_reload = true;
                         last_change = Some(Instant::now());
+                        for path in gml_paths {
+                            code_editor::process_gml_file_change(path);
+                        }
                     }
                 }
             }
@@ -78,16 +88,15 @@ pub fn run_reload(yyp_path: PathBuf) {
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
 
-        if pending_reload {
-            if let Some(t) = last_change {
-                if t.elapsed() >= DEBOUNCE {
-                    pending_reload = false;
-                    last_change = None;
-                    println!("Detected .gml change, reloading...");
-                    kill_runner();
-                    build_and_run(&yyp_path);
-                }
-            }
+        if pending_reload
+            && let Some(t) = last_change
+            && t.elapsed() >= DEBOUNCE
+        {
+            pending_reload = false;
+            last_change = None;
+            println!("Detected .gml change, reloading...");
+            kill_runner();
+            build_and_run(&yyp_path);
         }
     }
 }
@@ -127,10 +136,7 @@ fn build_and_run(yyp_path: &Path) {
         Ok(_) => {
             println!(
                 "  Build + run launched for {}",
-                yyp_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
+                yyp_path.file_name().unwrap_or_default().to_string_lossy()
             );
 
             // Prevent Runner.exe from stealing focus: poll until the foreground
