@@ -26,11 +26,11 @@ pub fn import_sprite_to_project(
         .ok_or_else(|| "Could not determine project directory from .yyp path".to_string())?;
 
     // --- 1. Parse the .yyp as a generic Value to preserve exact field order ---
-    let yyp_content = fs::read_to_string(project_path)
-        .map_err(|e| format!("Failed to read .yyp file: {e}"))?;
+    let yyp_content =
+        fs::read_to_string(project_path).map_err(|e| format!("Failed to read .yyp file: {e}"))?;
     let yyp_clean = strip_trailing_commas(&yyp_content);
-    let mut project: serde_json::Value = serde_json::from_str(&yyp_clean)
-        .map_err(|e| format!("Failed to parse .yyp JSON: {e}"))?;
+    let mut project: serde_json::Value =
+        serde_json::from_str(&yyp_clean).map_err(|e| format!("Failed to parse .yyp JSON: {e}"))?;
 
     // --- 2. Read overrides from existing sprite if dimensions match ---
     let sprite_dir = project_dir.join("sprites").join(sprite_name);
@@ -41,7 +41,10 @@ pub fn import_sprite_to_project(
         fs::remove_dir_all(&sprite_dir)
             .map_err(|e| format!("Failed to remove old sprite directory: {e}"))?;
         if overrides.is_some() {
-            println!("  Overwriting sprite (preserving bbox/origin): {}", sprite_dir.display());
+            println!(
+                "  Overwriting sprite (preserving bbox/origin): {}",
+                sprite_dir.display()
+            );
         } else {
             println!("  Removed existing sprite: {}", sprite_dir.display());
         }
@@ -90,10 +93,7 @@ pub fn import_sprite_to_project(
     // gm_folder_path is e.g. "Sprites/Enemies"
     // The parent's folderPath in the .yy becomes "folders/Sprites/Enemies.yy"
     let folder_yy_path = format!("folders/{gm_folder_path}.yy");
-    let parent_name = gm_folder_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(gm_folder_path);
+    let parent_name = gm_folder_path.rsplit('/').next().unwrap_or(gm_folder_path);
 
     let parent_ref = ResourceReference {
         name: parent_name.to_string(),
@@ -126,8 +126,7 @@ pub fn import_sprite_to_project(
     let yy_path = sprite_dir.join(format!("{sprite_name}.yy"));
     let yy_json = serde_json::to_string_pretty(&sprite_model)
         .map_err(|e| format!("Failed to serialize sprite .yy: {e}"))?;
-    fs::write(&yy_path, &yy_json)
-        .map_err(|e| format!("Failed to write sprite .yy: {e}"))?;
+    fs::write(&yy_path, &yy_json).map_err(|e| format!("Failed to write sprite .yy: {e}"))?;
 
     // --- 9. Ensure all folders exist in the .yyp ---
     ensure_gm_folders_value(&mut project, gm_folder_path)?;
@@ -158,8 +157,7 @@ pub fn import_sprite_to_project(
     // --- 11. Write the .yyp back to disk ---
     let yyp_json = serde_json::to_string_pretty(&project)
         .map_err(|e| format!("Failed to serialize .yyp: {e}"))?;
-    fs::write(project_path, &yyp_json)
-        .map_err(|e| format!("Failed to write .yyp: {e}"))?;
+    fs::write(project_path, &yyp_json).map_err(|e| format!("Failed to write .yyp: {e}"))?;
 
     println!(
         "  Imported sprite '{sprite_name}' ({} frame{}) into {}",
@@ -196,11 +194,9 @@ fn ensure_gm_folders_value(
 
         let folder_yy_path = format!("folders/{accumulated}.yy");
 
-        let already_exists = folders.iter().any(|f| {
-            f.get("folderPath")
-                .and_then(|p| p.as_str())
-                == Some(&folder_yy_path)
-        });
+        let already_exists = folders
+            .iter()
+            .any(|f| f.get("folderPath").and_then(|p| p.as_str()) == Some(&folder_yy_path));
 
         if !already_exists {
             let folder = GMFolder::new(part, &folder_yy_path);
@@ -238,7 +234,7 @@ pub fn compute_gm_folder_path(watch_dir: &Path, aseprite_path: &Path) -> String 
 /// Convert a string to CamelCase, splitting on `_`, `-`, `.`, and spaces.
 /// Each word's first letter is capitalized, the rest lowered.
 fn to_camel_case(s: &str) -> String {
-    s.split(|c: char| c == '_' || c == '-' || c == '.' || c == ' ')
+    s.split(['_', '-', '.', ' '])
         .filter(|part| !part.is_empty())
         .map(|part| {
             let mut chars = part.chars();

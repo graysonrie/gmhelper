@@ -1,6 +1,7 @@
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn process_gml_file_change(file: &Path) {
     if let Err(err) = process_gml_file_change_impl(file) {
@@ -35,9 +36,44 @@ fn process_gml_file_change_impl(file: &Path) -> io::Result<()> {
         new_content.push('\n');
     }
 
-    fs::write(file, new_content)?;
+    replace_via_temp(file, new_content.as_bytes())?;
     println!("Expanded command comments in {}", file.display());
     Ok(())
+}
+
+/// Write to a sibling `.tmp` file, then rename over `path` (same directory → atomic on Windows).
+fn replace_via_temp(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    let name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path has no file name",
+        )
+    })?;
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = dir.join(format!(
+        "{}.gmhelper.{}.{}.tmp",
+        name.to_string_lossy(),
+        std::process::id(),
+        stamp
+    ));
+
+    fs::write(&tmp_path, contents)?;
+    match fs::rename(&tmp_path, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp_path);
+            Err(e)
+        }
+    }
 }
 
 fn try_expand_line_command(line: &str) -> Option<String> {
