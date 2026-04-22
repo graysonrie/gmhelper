@@ -1,3 +1,4 @@
+mod history;
 mod sprites;
 
 use clap::{Parser, Subcommand};
@@ -58,10 +59,23 @@ enum SubCmd {
         #[arg(value_name = "YYP_FILE")]
         project: PathBuf,
     },
+
+    /// List recent gmhelper invocations, or re-run one by number (#1 = most recent)
+    Previous {
+        /// Re-execute the Nth most recent command (1–10; 1 = most recent)
+        #[arg(value_name = "N", value_parser = clap::value_parser!(u8).range(1..=10))]
+        index: Option<u8>,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
+
+    if !matches!(&cli.command, SubCmd::Previous { .. })
+        && let Err(e) = history::record_current_invocation()
+    {
+        eprintln!("Warning: could not save command history: {e}");
+    }
 
     match cli.command {
         SubCmd::Sprites {
@@ -75,6 +89,17 @@ fn main() {
             image_path,
         } => run_music(mp4, game_name, image_path),
         SubCmd::Reload { project } => hot_reloader::run_reload(project),
+        SubCmd::Previous { index: None } => {
+            let h = history::load();
+            print!("{}", history::list_text(&h));
+        }
+        SubCmd::Previous { index: Some(n) } => match history::reexecute(n) {
+            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        },
     }
 }
 

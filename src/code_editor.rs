@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -36,8 +37,18 @@ fn process_gml_file_change_impl(file: &Path) -> io::Result<()> {
         new_content.push('\n');
     }
 
-    replace_via_temp(file, new_content.as_bytes())?;
+    let bytes = new_content.as_bytes();
+    replace_via_temp(file, bytes)?;
+    nudge_in_place_save(file, bytes)?;
     println!("Expanded command comments in {}", file.display());
+    Ok(())
+}
+
+/// In-place write so an open script view in GameMaker may resync (like saving from another editor).
+fn nudge_in_place_save(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut f = fs::File::create(path)?;
+    f.write_all(contents)?;
+    f.sync_all()?;
     Ok(())
 }
 
