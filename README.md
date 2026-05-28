@@ -21,6 +21,12 @@ From the project root:
 cargo build --release
 ```
 
+Quick CLI setup:
+
+```bash
+cargo install --path . --force
+```
+
 Run commands with:
 
 ```bash
