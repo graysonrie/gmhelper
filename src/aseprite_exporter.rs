@@ -1,8 +1,10 @@
 use image::DynamicImage;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use crate::{EXPORT_TAGS_SCRIPT, sprites};
 
@@ -83,6 +85,8 @@ pub fn export_tags(
         println!("Found {} spritesheet(s) to process", export_infos.len());
     }
 
+    let mut spritesheets_to_delete = HashSet::new();
+
     for info in &export_infos {
         println!("Processing spritesheet: {}", info.path);
 
@@ -115,14 +119,17 @@ pub fn export_tags(
 
         // In normal export mode, a single-frame tag keeps the original PNG path
         // as its final output. Do not delete it during cleanup.
-        let should_delete_spritesheet = frames.len() > 1;
-        if should_delete_spritesheet {
-            let spritesheet_path = Path::new(&info.path);
-            if spritesheet_path.exists()
-                && let Err(e) = fs::remove_file(spritesheet_path)
-            {
-                eprintln!("Warning: Failed to remove temporary spritesheet: {e}");
-            }
+        if frames.len() > 1 {
+            spritesheets_to_delete.insert(info.path.clone());
+        }
+    }
+
+    for path in spritesheets_to_delete {
+        let spritesheet_path = Path::new(&path);
+        if spritesheet_path.exists()
+            && let Err(e) = fs::remove_file(spritesheet_path)
+        {
+            eprintln!("Warning: Failed to remove temporary spritesheet: {e}");
         }
     }
 
@@ -131,15 +138,29 @@ pub fn export_tags(
 
 fn extract_frames(info: &SpriteExportInfo) -> Result<Vec<DynamicImage>, String> {
     let spritesheet_path = Path::new(&info.path);
+    const MAX_ATTEMPTS: u32 = 5;
+    const RETRY_DELAY: Duration = Duration::from_millis(100);
 
-    if !spritesheet_path.exists() {
-        return Err(format!("Spritesheet not found: {}", info.path));
-    }
+    let mut last_err = String::new();
+    let rgba = 'load: {
+        for attempt in 0..MAX_ATTEMPTS {
+            if !spritesheet_path.exists() {
+                last_err = format!("Spritesheet not found: {}", info.path);
+            } else {
+                match image::open(spritesheet_path) {
+                    Ok(img) => break 'load img.into_rgba8(),
+                    Err(e) => last_err = format!("Failed to load spritesheet: {e}"),
+                }
+            }
 
-    let img = image::open(spritesheet_path)
-        .map_err(|e| format!("Failed to load spritesheet: {e}"))?
-        .into_rgba8();
-    let img = DynamicImage::ImageRgba8(img);
+            if attempt + 1 < MAX_ATTEMPTS {
+                std::thread::sleep(RETRY_DELAY);
+            }
+        }
+        return Err(last_err);
+    };
+
+    let img = DynamicImage::ImageRgba8(rgba);
 
     let sheet_width = img.width();
     let sheet_height = img.height();

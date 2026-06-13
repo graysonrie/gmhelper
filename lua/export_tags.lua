@@ -98,16 +98,27 @@ local function exportTags(filePath, outputDir)
       listTags = false
     }
 
-    -- Output JSON with sprite information for Rust to parse
-    -- Output to stderr to avoid mixing with Aseprite's stdout JSON
-    -- Properly escape the path and tag name for JSON
-    local escapedPath = string.gsub(outputPath, "\\", "\\\\")
-    escapedPath = string.gsub(escapedPath, '"', '\\"')
-    local escapedTagName = string.gsub(tag.name, '"', '\\"')
+    local file = io.open(outputPath, "rb")
+    if not file then
+      io.stderr:write(string.format(
+        'Warning: ExportSpriteSheet did not create file for tag "%s": %s\n',
+        tag.name,
+        outputPath
+      ))
+    else
+      file:close()
 
-    -- Output to stderr (io.stderr) so it doesn't mix with Aseprite's JSON output
-    io.stderr:write(string.format('JSON_EXPORT:{"path":"%s","width":%d,"height":%d,"frame_count":%d,"tag_name":"%s"}\n',
-      escapedPath, spriteWidth, spriteHeight, frameCount, escapedTagName))
+      -- Output JSON with sprite information for Rust to parse
+      -- Output to stderr to avoid mixing with Aseprite's stdout JSON
+      -- Properly escape the path and tag name for JSON
+      local escapedPath = string.gsub(outputPath, "\\", "\\\\")
+      escapedPath = string.gsub(escapedPath, '"', '\\"')
+      local escapedTagName = string.gsub(tag.name, '"', '\\"')
+
+      -- Output to stderr (io.stderr) so it doesn't mix with Aseprite's JSON output
+      io.stderr:write(string.format('JSON_EXPORT:{"path":"%s","width":%d,"height":%d,"frame_count":%d,"tag_name":"%s"}\n',
+        escapedPath, spriteWidth, spriteHeight, frameCount, escapedTagName))
+    end
   end
 end
 

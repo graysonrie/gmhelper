@@ -5,8 +5,10 @@ mod sprites;
 use clap::{Parser, Subcommand};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use ost_export::Mp4ExportOptions;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::{Duration, Instant};
 
 use crate::aseprite_exporter::{ensure_script_available, export_tags};
 
@@ -114,6 +116,9 @@ fn main() {
 // Sprites subcommand
 // ---------------------------------------------------------------------------
 
+const SPRITE_DEBOUNCE: Duration = Duration::from_millis(500);
+const SPRITE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 fn run_sprites(directory: Option<PathBuf>, start: bool, project: Option<PathBuf>) {
     let watch_directory = if start {
         std::env::current_dir().unwrap_or_else(|e| {
@@ -181,30 +186,52 @@ fn run_sprites(directory: Option<PathBuf>, start: bool, project: Option<PathBuf>
         .watch(&watch_directory, RecursiveMode::Recursive)
         .expect("Failed to watch directory");
 
+    let mut pending_exports: HashMap<PathBuf, Instant> = HashMap::new();
+    let mut in_flight: HashSet<PathBuf> = HashSet::new();
+
     loop {
-        match rx.recv() {
+        match rx.recv_timeout(SPRITE_POLL_INTERVAL) {
             Ok(Ok(event)) => {
                 if let EventKind::Modify(_) | EventKind::Create(_) = event.kind {
+                    let mut seen = HashSet::new();
                     for path in event.paths {
-                        if let Some(ext) = path.extension()
-                            && ext == "aseprite"
+                        if seen.insert(path.clone())
+                            && path.extension().and_then(|e| e.to_str()) == Some("aseprite")
                             && path.exists()
                         {
-                            println!("Processing: {}", path.display());
-                            if let Err(e) = export_tags(
-                                &path,
-                                &script_path,
-                                project_path.as_deref(),
-                                &watch_directory,
-                            ) {
-                                eprintln!("Error exporting {}: {}", path.display(), e);
-                            }
+                            pending_exports.insert(path, Instant::now());
                         }
                     }
                 }
             }
             Ok(Err(e)) => eprintln!("Watch error: {e}"),
-            Err(e) => eprintln!("Channel error: {e}"),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+
+        let ready: Vec<PathBuf> = pending_exports
+            .iter()
+            .filter(|(path, last_change)| {
+                !in_flight.contains(*path) && last_change.elapsed() >= SPRITE_DEBOUNCE
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+
+        for path in ready {
+            pending_exports.remove(&path);
+            in_flight.insert(path.clone());
+
+            println!("Processing: {}", path.display());
+            if let Err(e) = export_tags(
+                &path,
+                &script_path,
+                project_path.as_deref(),
+                &watch_directory,
+            ) {
+                eprintln!("Error exporting {}: {}", path.display(), e);
+            }
+
+            in_flight.remove(&path);
         }
     }
 }
