@@ -5,20 +5,25 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use crate::code_editor;
+use crate::{code_editor, gm_config};
 
 unsafe extern "system" {
     fn GetForegroundWindow() -> isize;
     fn SetForegroundWindow(hwnd: isize) -> i32;
 }
 
-const IGOR_PATH: &str = r"C:\ProgramData\GameMakerStudio2-Beta\Cache\runtimes\runtime-2024.1400.4.968\bin\igor\windows\x64\Igor.exe";
-const BUILD_BFF_PATH: &str =
+const IGOR_PATH_BETA: &str = r"C:\ProgramData\GameMakerStudio2-Beta\Cache\runtimes\runtime-2024.1400.4.968\bin\igor\windows\x64\Igor.exe";
+const BUILD_BFF_PATH_BETA: &str =
     r"C:\Users\grays\AppData\Local\GameMakerStudio2-Beta\GMS2TEMP\build.bff";
+
+const IGOR_PATH_STANDARD: &str = r"C:\ProgramData\GameMakerStudio2\Cache\runtimes\runtime-2024.14.4.268\bin\igor\windows\x64\Igor.exe";
+const BUILD_BFF_PATH_STANDARD: &str =
+    r"C:\Users\grays\AppData\Local\GameMakerStudio2\GMS2TEMP\build.bff";
+
 const RUNNER_EXE: &str = "Runner.exe";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-const DEBOUNCE: Duration = Duration::from_secs(1);
-const POLL_INTERVAL: Duration = Duration::from_millis(200);
+const DEBOUNCE: Duration = Duration::from_millis(500);
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub fn run_reload(yyp_path: PathBuf) {
     if !yyp_path.exists() {
@@ -64,6 +69,8 @@ pub fn run_reload(yyp_path: PathBuf) {
     let mut pending_reload = false;
     let mut last_change: Option<Instant> = None;
 
+    let cfg = gm_config::get_or_create_config().expect("Could not get config");
+
     loop {
         match rx.recv_timeout(POLL_INTERVAL) {
             Ok(Ok(event)) => {
@@ -96,7 +103,7 @@ pub fn run_reload(yyp_path: PathBuf) {
             last_change = None;
             println!("Detected .gml change, reloading...");
             kill_runner();
-            build_and_run(&yyp_path);
+            build_and_run(&yyp_path, cfg.use_gm_beta);
         }
     }
 }
@@ -117,12 +124,24 @@ fn kill_runner() {
     }
 }
 
-fn build_and_run(yyp_path: &Path) {
+fn build_and_run(yyp_path: &Path, use_gm_beta: bool) {
     let saved_hwnd = unsafe { GetForegroundWindow() };
 
-    let options_arg = format!("-options={BUILD_BFF_PATH}");
+    let build_bff_path = if use_gm_beta {
+        BUILD_BFF_PATH_BETA
+    } else {
+        BUILD_BFF_PATH_STANDARD
+    };
 
-    let result = Command::new(IGOR_PATH)
+    let igor_path = if use_gm_beta {
+        IGOR_PATH_BETA
+    } else {
+        IGOR_PATH_STANDARD
+    };
+
+    let options_arg = format!("-options={build_bff_path}");
+
+    let result = Command::new(igor_path)
         .arg("-j=8")
         .arg(&options_arg)
         .arg("-v")

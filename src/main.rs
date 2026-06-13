@@ -1,3 +1,4 @@
+mod gm_config;
 mod history;
 mod sprites;
 
@@ -39,6 +40,11 @@ enum SubCmd {
         /// imported directly into the project instead of being saved as GIF/PNG.
         #[arg(short, long, value_name = "YYP_FILE")]
         project: Option<PathBuf>,
+    },
+
+    Config {
+        #[arg(short, long)]
+        beta: bool,
     },
 
     /// Export WAV files from a music/ folder in the cwd as GameMaker-ready OGG files
@@ -88,6 +94,7 @@ fn main() {
             game_name,
             image_path,
         } => run_music(mp4, game_name, image_path),
+        SubCmd::Config { beta } => run_config(Some(beta)),
         SubCmd::Reload { project } => hot_reloader::run_reload(project),
         SubCmd::Previous { index: None } => {
             let h = history::load();
@@ -240,6 +247,29 @@ fn run_music(mp4: bool, game_name: Option<String>, image_path: Option<String>) {
             ),
             Err(e) => {
                 eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+pub fn run_config(beta: Option<bool>) {
+    if let Some(beta) = beta {
+        match gm_config::get_or_create_config() {
+            Ok(mut config) => {
+                if beta {
+                    println!("Setting config to use GM Beta");
+                } else {
+                    println!("Setting config to use default GM");
+                }
+                config.use_gm_beta = beta;
+                if let Err(e) = gm_config::write_config(&config) {
+                    eprintln!("Error writing config: {e}");
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("Could not get config: {e}");
                 std::process::exit(1);
             }
         }
