@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
+use walkdir::WalkDir;
 
 use crate::{EXPORT_TAGS_SCRIPT, sprites};
 
@@ -407,4 +408,37 @@ pub fn ensure_script_available() -> Result<PathBuf, String> {
         .map_err(|e| format!("Failed to write script to {}: {e}", script_path.display()))?;
 
     Ok(script_path)
+}
+
+pub fn export_all_sprites(
+    path_to_sprites_dir: &Path,
+    project_path: &Path,
+    should_focus_gamemaker: bool,
+) -> Result<(), anyhow::Error> {
+    let script_path = ensure_script_available().map_err(|e| anyhow::anyhow!(e))?;
+    for entry in WalkDir::new(path_to_sprites_dir).into_iter().flatten() {
+        let path = entry.path();
+        let Some(extension) = path.extension() else {
+            continue;
+        };
+
+        if !path.is_file() || extension != "aseprite" {
+            continue;
+        }
+        let aseprite_path = path;
+
+        export_tags(
+            aseprite_path,
+            &script_path,
+            Some(project_path),
+            path_to_sprites_dir,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
+    }
+
+    if should_focus_gamemaker {
+        gamemaker_window_manip::focus_gamemaker_window(false)?;
+    }
+
+    Ok(())
 }

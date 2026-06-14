@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use ost_export::Mp4ExportOptions;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
@@ -46,7 +46,12 @@ enum SubCmd {
 
     Config {
         #[arg(short, long)]
-        beta: bool,
+        beta: Option<bool>,
+
+        /// Path to a GameMaker .yyp project file. When set, exported frames are
+        /// imported directly into the project instead of being saved as GIF/PNG.
+        #[arg(short, long, value_name = "YYP_FILE")]
+        all_sprites_export_project: Option<String>,
     },
 
     /// Export WAV files from a music/ folder in the cwd as GameMaker-ready OGG files
@@ -74,6 +79,8 @@ enum SubCmd {
         #[arg(value_name = "N", value_parser = clap::value_parser!(u8).range(1..=10))]
         index: Option<u8>,
     },
+
+    AllSprites,
 }
 
 fn main() {
@@ -96,7 +103,10 @@ fn main() {
             game_name,
             image_path,
         } => run_music(mp4, game_name, image_path),
-        SubCmd::Config { beta } => run_config(Some(beta)),
+        SubCmd::Config {
+            beta,
+            all_sprites_export_project,
+        } => run_config(beta, all_sprites_export_project),
         SubCmd::Reload { project } => hot_reloader::run_reload(project),
         SubCmd::Previous { index: None } => {
             let h = history::load();
@@ -109,7 +119,36 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        SubCmd::AllSprites => run_all_sprites(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// All Sprites subcommand
+// ---------------------------------------------------------------------------
+fn run_all_sprites() {
+    let path_to_sprites_dir = std::env::current_dir().unwrap_or_else(|e| {
+        eprintln!("Error: Failed to get current directory: {e}");
+        std::process::exit(1);
+    });
+
+    let config = gm_config::get_or_create_config().unwrap_or_else(|e| {
+        eprintln!("Error: Failed to get config: {e}");
+        std::process::exit(1);
+    });
+
+    let project_path = config.all_sprites_export_yyp_path.unwrap_or_else(|| {
+        eprintln!("Error: All Sprites export path is not set in the config");
+        std::process::exit(1);
+    });
+
+    aseprite_exporter::export_all_sprites(&path_to_sprites_dir, Path::new(&project_path), true)
+        .unwrap_or_else(|e| {
+            eprintln!("Error: Failed to get current directory: {e}");
+            std::process::exit(1);
+        });
+
+    println!("All sprites exported successfully");
 }
 
 // ---------------------------------------------------------------------------
@@ -280,16 +319,23 @@ fn run_music(mp4: bool, game_name: Option<String>, image_path: Option<String>) {
     }
 }
 
-pub fn run_config(beta: Option<bool>) {
-    if let Some(beta) = beta {
+pub fn run_config(beta: Option<bool>, all_sprites_export_project: Option<String>) {
+    // Only proceed if at least one value is Some(_)
+    if beta.is_some() || all_sprites_export_project.is_some() {
         match gm_config::get_or_create_config() {
             Ok(mut config) => {
-                if beta {
-                    println!("Setting config to use GM Beta");
-                } else {
-                    println!("Setting config to use default GM");
+                if let Some(beta) = beta {
+                    if beta {
+                        println!("Setting config to use GM Beta");
+                    } else {
+                        println!("Setting config to use default GM");
+                    }
+                    config.use_gm_beta = beta;
                 }
-                config.use_gm_beta = beta;
+                if let Some(project) = all_sprites_export_project {
+                    println!("Setting all_sprites_export_yyp_path to '{project}'");
+                    config.all_sprites_export_yyp_path = Some(project);
+                }
                 if let Err(e) = gm_config::write_config(&config) {
                     eprintln!("Error writing config: {e}");
                     std::process::exit(1);

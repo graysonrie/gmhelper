@@ -3,6 +3,7 @@ name = "gmhelper"
 version = "0.1.0"
 edition = "2024"
 
+
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
 notify = "6.1.1"
@@ -11,7 +12,11 @@ serde_json = { "version" = "1.0.145", "features" = ["preserve_order"] }
 image = "0.25"
 gif = "0.13"
 ost_export = { path = "crates/ost_export" }
+gamemaker_window_manip = { path = "crates/gamemaker_window_manip" }
 dirs = "6.0.0"
+walkdir = "2.5.0"
+anyhow = "1.0.102"
+tokio = { version = "1.52.3", features = ["full"] }
 
 [dependencies.uuid]
 version = "1.10.0"
