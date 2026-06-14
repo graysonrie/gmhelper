@@ -664,6 +664,7 @@ dependencies = [
  "image",
  "notify",
  "ost_export",
+ "rayon",
  "serde",
  "serde_json",
  "tokio",

@@ -1,4 +1,5 @@
 use image::DynamicImage;
+use rayon::prelude::*;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs;
@@ -10,7 +11,7 @@ use walkdir::WalkDir;
 use crate::{EXPORT_TAGS_SCRIPT, sprites};
 
 // ---------------------------------------------------------------------------
-// Sprite export internals (unchanged)
+// Sprite export internals
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
@@ -22,12 +23,64 @@ struct SpriteExportInfo {
     tag_name: String,
 }
 
+pub struct PreparedSpriteImport {
+    pub aseprite_path: PathBuf,
+    pub tag_name: String,
+    pub spritesheet_stem: String,
+    pub frames: Vec<DynamicImage>,
+    pub width: u32,
+    pub height: u32,
+    pub gm_folder: String,
+}
+
+const ASEPRITE_EXPORT_THREADS: usize = 4;
+
 pub fn export_tags(
     aseprite_path: &Path,
     script_path: &Path,
     project_path: Option<&Path>,
     watch_dir: &Path,
 ) -> Result<(), String> {
+    let output_dir = aseprite_path
+        .parent()
+        .ok_or_else(|| "Could not get parent directory".to_string())?;
+
+    let prepared = prepare_aseprite_export(aseprite_path, script_path, watch_dir)?;
+
+    for import in prepared {
+        if let Some(yyp) = project_path {
+            let sprite_name =
+                sprites::gm_import::derive_sprite_name(aseprite_path, &import.tag_name)?;
+
+            if let Err(e) = sprites::gm_import::import_sprite_to_project(
+                yyp,
+                &sprite_name,
+                &import.frames,
+                &import.gm_folder,
+                import.width,
+                import.height,
+            ) {
+                eprintln!("Error importing sprite to GM project: {e}");
+            }
+        } else if let Err(e) = save_frames_as_output_from_tag(
+            &import.spritesheet_stem,
+            &import.frames,
+            output_dir,
+            import.width,
+            import.height,
+        ) {
+            eprintln!("Error saving output for {}: {e}", import.tag_name);
+        }
+    }
+
+    Ok(())
+}
+
+fn prepare_aseprite_export(
+    aseprite_path: &Path,
+    script_path: &Path,
+    watch_dir: &Path,
+) -> Result<Vec<PreparedSpriteImport>, String> {
     let output_dir = aseprite_path
         .parent()
         .ok_or_else(|| "Could not get parent directory".to_string())?;
@@ -86,6 +139,8 @@ pub fn export_tags(
         println!("Found {} spritesheet(s) to process", export_infos.len());
     }
 
+    let gm_folder = sprites::gm_import::compute_gm_folder_path(watch_dir, aseprite_path);
+    let mut prepared = Vec::new();
     let mut spritesheets_to_delete = HashSet::new();
 
     for info in &export_infos {
@@ -99,30 +154,25 @@ pub fn export_tags(
             }
         };
 
-        if let Some(yyp) = project_path {
-            let sprite_name =
-                sprites::gm_import::derive_sprite_name(aseprite_path, &info.tag_name)?;
-            let gm_folder = sprites::gm_import::compute_gm_folder_path(watch_dir, aseprite_path);
-
-            if let Err(e) = sprites::gm_import::import_sprite_to_project(
-                yyp,
-                &sprite_name,
-                &frames,
-                &gm_folder,
-                info.width,
-                info.height,
-            ) {
-                eprintln!("Error importing sprite to GM project: {e}");
-            }
-        } else if let Err(e) = save_frames_as_output(info, &frames, output_dir) {
-            eprintln!("Error saving output for {}: {e}", info.path);
-        }
-
-        // In normal export mode, a single-frame tag keeps the original PNG path
-        // as its final output. Do not delete it during cleanup.
         if frames.len() > 1 {
             spritesheets_to_delete.insert(info.path.clone());
         }
+
+        let spritesheet_stem = Path::new(&info.path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("spritesheet")
+            .to_string();
+
+        prepared.push(PreparedSpriteImport {
+            aseprite_path: aseprite_path.to_path_buf(),
+            tag_name: info.tag_name.clone(),
+            spritesheet_stem,
+            frames,
+            width: info.width,
+            height: info.height,
+            gm_folder: gm_folder.clone(),
+        });
     }
 
     for path in spritesheets_to_delete {
@@ -134,7 +184,7 @@ pub fn export_tags(
         }
     }
 
-    Ok(())
+    Ok(prepared)
 }
 
 fn extract_frames(info: &SpriteExportInfo) -> Result<Vec<DynamicImage>, String> {
@@ -195,20 +245,16 @@ fn extract_frames(info: &SpriteExportInfo) -> Result<Vec<DynamicImage>, String> 
     Ok(frames)
 }
 
-fn save_frames_as_output(
-    info: &SpriteExportInfo,
+fn save_frames_as_output_from_tag(
+    base_name: &str,
     frames: &[DynamicImage],
     output_dir: &Path,
+    width: u32,
+    height: u32,
 ) -> Result<(), String> {
-    let spritesheet_path = Path::new(&info.path);
-    let base_name = spritesheet_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or("Invalid spritesheet filename")?;
-
     let output_path = if frames.len() > 1 {
         let gif_path = output_dir.join(format!("{base_name}.gif"));
-        create_gif(frames, &gif_path, info.width, info.height)?;
+        create_gif(frames, &gif_path, width, height)?;
         gif_path
     } else {
         let png_path = output_dir.join(format!("{base_name}.png"));
@@ -416,25 +462,97 @@ pub fn export_all_sprites(
     should_focus_gamemaker: bool,
 ) -> Result<(), anyhow::Error> {
     let script_path = ensure_script_available().map_err(|e| anyhow::anyhow!(e))?;
-    for entry in WalkDir::new(path_to_sprites_dir).into_iter().flatten() {
-        let path = entry.path();
-        let Some(extension) = path.extension() else {
-            continue;
-        };
 
-        if !path.is_file() || extension != "aseprite" {
-            continue;
-        }
-        let aseprite_path = path;
+    let aseprite_paths: Vec<PathBuf> = WalkDir::new(path_to_sprites_dir)
+        .into_iter()
+        .flatten()
+        .filter(|entry| {
+            entry.path().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "aseprite")
+        })
+        .map(|entry| entry.into_path())
+        .collect();
 
-        export_tags(
-            aseprite_path,
-            &script_path,
-            Some(project_path),
-            path_to_sprites_dir,
-        )
-        .map_err(|e| anyhow::anyhow!(e))?;
+    if aseprite_paths.is_empty() {
+        println!("No .aseprite files found under {}", path_to_sprites_dir.display());
+    } else {
+        println!(
+            "Exporting {} .aseprite file(s) (up to {ASEPRITE_EXPORT_THREADS} parallel Aseprite processes)...",
+            aseprite_paths.len()
+        );
     }
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(ASEPRITE_EXPORT_THREADS)
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to create thread pool: {e}"))?;
+
+    let script_path = &script_path;
+    let watch_dir = path_to_sprites_dir;
+
+    let export_results: Vec<(PathBuf, Result<Vec<PreparedSpriteImport>, String>)> =
+        pool.install(|| {
+            aseprite_paths
+                .par_iter()
+                .map(|path| {
+                    let result = prepare_aseprite_export(path, script_path, watch_dir);
+                    (path.clone(), result)
+                })
+                .collect()
+        });
+
+    let mut prepared_imports = Vec::new();
+    let mut export_errors = Vec::new();
+
+    for (path, result) in export_results {
+        match result {
+            Ok(imports) => prepared_imports.extend(imports),
+            Err(e) => {
+                eprintln!("Error exporting {}: {e}", path.display());
+                export_errors.push((path, e));
+            }
+        }
+    }
+
+    if !export_errors.is_empty() {
+        return Err(anyhow::anyhow!(
+            "{} .aseprite file(s) failed to export",
+            export_errors.len()
+        ));
+    }
+
+    if prepared_imports.is_empty() {
+        if should_focus_gamemaker {
+            gamemaker_window_manip::focus_gamemaker_window(false)?;
+        }
+        return Ok(());
+    }
+
+    let name_entries: Vec<(PathBuf, String)> = prepared_imports
+        .iter()
+        .map(|import| (import.aseprite_path.clone(), import.tag_name.clone()))
+        .collect();
+
+    let sprite_names = sprites::gm_import::resolve_sprite_names(watch_dir, &name_entries)
+        .map_err(anyhow::Error::msg)?;
+
+    let import_requests: Vec<sprites::gm_import::SpriteImportRequest> = prepared_imports
+        .into_iter()
+        .zip(sprite_names)
+        .map(|(import, sprite_name)| sprites::gm_import::SpriteImportRequest {
+            sprite_name,
+            frames: import.frames,
+            gm_folder_path: import.gm_folder,
+            width: import.width,
+            height: import.height,
+        })
+        .collect();
+
+    sprites::gm_import::import_sprites_batch(project_path, &import_requests)
+        .map_err(anyhow::Error::msg)?;
 
     if should_focus_gamemaker {
         gamemaker_window_manip::focus_gamemaker_window(false)?;
