@@ -51,3 +51,5 @@ pub fn start_hot_reload_task(path_to_yyp: std::path::PathBuf) -> HotReloadTask {
 
     HotReloadTask { shutdown, thread }
 }
+
+pub use gm_config::{get_or_create_config, write_config};
