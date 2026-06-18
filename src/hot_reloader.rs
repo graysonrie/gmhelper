@@ -2,7 +2,10 @@ use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::time::{Duration, Instant};
 
 use crate::{code_editor, gm_config};
@@ -25,32 +28,27 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DEBOUNCE: Duration = Duration::from_millis(500);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-pub fn run_reload(yyp_path: PathBuf) {
+pub fn run_reload(yyp_path: PathBuf, shutdown: &AtomicBool) -> anyhow::Result<()> {
     if !yyp_path.exists() {
-        eprintln!(
-            "Error: Project file '{}' does not exist",
+        anyhow::bail!(
+            "Project file '{}' does not exist",
             yyp_path.display()
         );
-        std::process::exit(1);
     }
 
     match yyp_path.extension().and_then(|e| e.to_str()) {
         Some("yyp") => {}
         _ => {
-            eprintln!(
-                "Error: '{}' is not a .yyp file. Provide a valid GameMaker project file.",
+            anyhow::bail!(
+                "'{}' is not a .yyp file. Provide a valid GameMaker project file.",
                 yyp_path.display()
             );
-            std::process::exit(1);
         }
     }
 
     let project_dir = yyp_path
         .parent()
-        .unwrap_or_else(|| {
-            eprintln!("Error: Could not determine project directory from .yyp path");
-            std::process::exit(1);
-        })
+        .ok_or_else(|| anyhow::anyhow!("Could not determine project directory from .yyp path"))?
         .to_path_buf();
 
     println!("Hot-reloading project: {}", yyp_path.display());
@@ -60,18 +58,22 @@ pub fn run_reload(yyp_path: PathBuf) {
     let (tx, rx) = mpsc::channel();
 
     let mut watcher =
-        RecommendedWatcher::new(tx, Config::default()).expect("Failed to create file watcher");
+        RecommendedWatcher::new(tx, Config::default()).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     watcher
         .watch(&project_dir, RecursiveMode::Recursive)
-        .expect("Failed to watch project directory");
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let mut pending_reload = false;
     let mut last_change: Option<Instant> = None;
 
-    let cfg = gm_config::get_or_create_config().expect("Could not get config");
+    let cfg = gm_config::get_or_create_config().map_err(|error| anyhow::anyhow!(error))?;
 
     loop {
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+
         match rx.recv_timeout(POLL_INTERVAL) {
             Ok(Ok(event)) => {
                 if let EventKind::Modify(_) | EventKind::Create(_) = event.kind {
@@ -106,6 +108,8 @@ pub fn run_reload(yyp_path: PathBuf) {
             build_and_run(&yyp_path, cfg.use_gm_beta);
         }
     }
+
+    Ok(())
 }
 
 fn kill_runner() {

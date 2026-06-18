@@ -1,5 +1,11 @@
-use std::path::Path;
-use tokio::task::JoinHandle;
+use std::{
+    path::Path,
+    sync::{
+        atomic::AtomicBool,
+        Arc,
+    },
+    thread::{self, JoinHandle},
+};
 
 mod aseprite_exporter;
 mod code_editor;
@@ -18,8 +24,30 @@ pub fn export_all_sprites(
     aseprite_exporter::export_all_sprites(path_to_sprites_dir, project_path, should_focus_gamemaker)
 }
 
-pub fn run_hot_reload_task(path_to_yyp: std::path::PathBuf) -> JoinHandle<()> {
-    tokio::task::spawn(async move {
-        hot_reloader::run_reload(path_to_yyp);
-    })
+pub struct HotReloadTask {
+    shutdown: Arc<AtomicBool>,
+    thread: JoinHandle<()>,
+}
+
+impl HotReloadTask {
+    pub fn shutdown_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.shutdown)
+    }
+
+    pub fn into_join_handle(self) -> JoinHandle<()> {
+        self.thread
+    }
+}
+
+pub fn start_hot_reload_task(path_to_yyp: std::path::PathBuf) -> HotReloadTask {
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_for_thread = Arc::clone(&shutdown);
+
+    let thread = thread::spawn(move || {
+        if let Err(error) = hot_reloader::run_reload(path_to_yyp, &shutdown_for_thread) {
+            eprintln!("Hot reload error: {error}");
+        }
+    });
+
+    HotReloadTask { shutdown, thread }
 }

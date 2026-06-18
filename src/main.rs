@@ -107,7 +107,13 @@ fn main() {
             beta,
             all_sprites_export_project,
         } => run_config(beta, all_sprites_export_project),
-        SubCmd::Reload { project } => hot_reloader::run_reload(project),
+        SubCmd::Reload { project } => {
+            let shutdown = std::sync::atomic::AtomicBool::new(false);
+            if let Err(error) = hot_reloader::run_reload(project, &shutdown) {
+                eprintln!("Error: {error}");
+                std::process::exit(1);
+            }
+        }
         SubCmd::Previous { index: None } => {
             let h = history::load();
             print!("{}", history::list_text(&h));
