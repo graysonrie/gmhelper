@@ -191,6 +191,7 @@ fn write_sprite_files(
         sprite_model.origin = ov.origin;
         sprite_model.sequence.xorigin = ov.xorigin;
         sprite_model.sequence.yorigin = ov.yorigin;
+        sprite_model.sequence.playback_speed = ov.playback_speed;
     }
 
     let yy_path = sprite_dir.join(format!("{sprite_name}.yy"));
@@ -476,6 +477,7 @@ struct SpriteOverrides {
     origin: i32,
     xorigin: i32,
     yorigin: i32,
+    playback_speed: f64,
 }
 
 fn read_sprite_overrides(
@@ -507,6 +509,7 @@ fn read_sprite_overrides(
         origin: val.get("origin")?.as_i64()? as i32,
         xorigin: seq.get("xorigin")?.as_i64()? as i32,
         yorigin: seq.get("yorigin")?.as_i64()? as i32,
+        playback_speed: seq.get("playbackSpeed")?.as_f64()?,
     })
 }
 

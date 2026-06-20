@@ -118,7 +118,7 @@ impl GMSpriteModel {
             },
             name: name.to_string(),
             playback: 1,
-            playback_speed: 30.0,
+            playback_speed: 10.0,
             playback_speed_type: 0,
             resource_type: "GMSequence".to_string(),
             resource_version: "2.0".to_string(),
