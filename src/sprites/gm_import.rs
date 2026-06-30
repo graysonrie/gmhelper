@@ -192,6 +192,7 @@ fn write_sprite_files(
         sprite_model.sequence.xorigin = ov.xorigin;
         sprite_model.sequence.yorigin = ov.yorigin;
         sprite_model.sequence.playback_speed = ov.playback_speed;
+        sprite_model.collision_kind = ov.collision_kind; // this allows setting precise collisions to still carry over
     }
 
     let yy_path = sprite_dir.join(format!("{sprite_name}.yy"));
@@ -478,6 +479,7 @@ struct SpriteOverrides {
     xorigin: i32,
     yorigin: i32,
     playback_speed: f64,
+    collision_kind: i32,
 }
 
 fn read_sprite_overrides(
@@ -510,6 +512,7 @@ fn read_sprite_overrides(
         xorigin: seq.get("xorigin")?.as_i64()? as i32,
         yorigin: seq.get("yorigin")?.as_i64()? as i32,
         playback_speed: seq.get("playbackSpeed")?.as_f64()?,
+        collision_kind: seq.get("collisionKind")?.as_i64()? as i32,
     })
 }
 
