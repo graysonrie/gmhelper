@@ -495,6 +495,7 @@ fn read_sprite_overrides(
 
     let old_width = val.get("width")?.as_i64()?;
     let old_height = val.get("height")?.as_i64()?;
+    let collision_kind = val.get("collisionKind")?.as_i64()? as i32;
 
     if old_width != new_width as i64 || old_height != new_height as i64 {
         return None;
@@ -512,7 +513,7 @@ fn read_sprite_overrides(
         xorigin: seq.get("xorigin")?.as_i64()? as i32,
         yorigin: seq.get("yorigin")?.as_i64()? as i32,
         playback_speed: seq.get("playbackSpeed")?.as_f64()?,
-        collision_kind: seq.get("collisionKind")?.as_i64()? as i32,
+        collision_kind
     })
 }
 
