@@ -1,14 +1,14 @@
 use image::DynamicImage;
 use rayon::prelude::*;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 use walkdir::WalkDir;
 
-use crate::{EXPORT_TAGS_SCRIPT, sprites};
+use crate::{export_cache, EXPORT_TAGS_SCRIPT, sprites};
 
 // ---------------------------------------------------------------------------
 // Sprite export internals
@@ -476,13 +476,57 @@ pub fn export_all_sprites(
         .map(|entry| entry.into_path())
         .collect();
 
+    let force_export = export_cache::is_force_export();
+    if force_export {
+        println!("Cache bypassed (GMHELPER_FORCE_EXPORT)");
+    }
+
+    let mut cache =
+        export_cache::ExportCache::load(path_to_sprites_dir, project_path).map_err(anyhow::Error::msg)?;
+
+    let current_rel_paths: HashSet<String> = aseprite_paths
+        .iter()
+        .map(|path| export_cache::relative_path_key(path_to_sprites_dir, path))
+        .collect::<Result<_, _>>()
+        .map_err(anyhow::Error::msg)?;
+
+    let mut to_export = Vec::new();
+    let mut skipped = 0usize;
+
+    for path in &aseprite_paths {
+        let rel_path = export_cache::relative_path_key(path_to_sprites_dir, path)
+            .map_err(anyhow::Error::msg)?;
+        let file_hash = export_cache::hash_file(path).map_err(anyhow::Error::msg)?;
+
+        if !force_export && cache.is_unchanged(&rel_path, &file_hash) {
+            skipped += 1;
+            continue;
+        }
+
+        to_export.push(path.clone());
+    }
+
     if aseprite_paths.is_empty() {
         println!("No .aseprite files found under {}", path_to_sprites_dir.display());
+    } else if to_export.is_empty() {
+        println!("Skipped {skipped} unchanged .aseprite file(s)");
     } else {
         println!(
-            "Exporting {} .aseprite file(s) (up to {ASEPRITE_EXPORT_THREADS} parallel Aseprite processes)...",
-            aseprite_paths.len()
+            "Skipped {skipped} unchanged, exporting {} .aseprite file(s) (up to {ASEPRITE_EXPORT_THREADS} parallel Aseprite processes)...",
+            to_export.len()
         );
+    }
+
+    if to_export.is_empty() {
+        cache.retain_files(&current_rel_paths);
+        cache
+            .save(path_to_sprites_dir)
+            .map_err(anyhow::Error::msg)?;
+
+        if should_focus_gamemaker {
+            gamemaker_window_manip::focus_gamemaker_window(false)?;
+        }
+        return Ok(());
     }
 
     let pool = rayon::ThreadPoolBuilder::new()
@@ -495,7 +539,7 @@ pub fn export_all_sprites(
 
     let export_results: Vec<(PathBuf, Result<Vec<PreparedSpriteImport>, String>)> =
         pool.install(|| {
-            aseprite_paths
+            to_export
                 .par_iter()
                 .map(|path| {
                     let result = prepare_aseprite_export(path, script_path, watch_dir);
@@ -525,6 +569,11 @@ pub fn export_all_sprites(
     }
 
     if prepared_imports.is_empty() {
+        cache.retain_files(&current_rel_paths);
+        cache
+            .save(path_to_sprites_dir)
+            .map_err(anyhow::Error::msg)?;
+
         if should_focus_gamemaker {
             gamemaker_window_manip::focus_gamemaker_window(false)?;
         }
@@ -536,22 +585,89 @@ pub fn export_all_sprites(
         .map(|import| (import.aseprite_path.clone(), import.tag_name.clone()))
         .collect();
 
-    let sprite_names = sprites::gm_import::resolve_sprite_names(watch_dir, &name_entries)
+    let to_export_set: HashSet<PathBuf> = to_export.iter().cloned().collect();
+    let mut resolution_entries = name_entries.clone();
+
+    for path in &aseprite_paths {
+        if to_export_set.contains(path) {
+            continue;
+        }
+
+        let rel_path = export_cache::relative_path_key(path_to_sprites_dir, path)
+            .map_err(anyhow::Error::msg)?;
+        let Some(file_cache) = cache.files.get(&rel_path) else {
+            continue;
+        };
+
+        for tag_name in file_cache.tags.keys() {
+            resolution_entries.push((path.clone(), tag_name.clone()));
+        }
+    }
+
+    let resolved_names = sprites::gm_import::resolve_sprite_names(watch_dir, &resolution_entries)
         .map_err(anyhow::Error::msg)?;
+
+    let name_lookup: HashMap<(PathBuf, String), String> = resolution_entries
+        .into_iter()
+        .zip(resolved_names)
+        .collect();
+
+    let sprite_names: Vec<String> = name_entries
+        .iter()
+        .map(|entry| {
+            name_lookup
+                .get(entry)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("Missing resolved sprite name for {}", entry.0.display()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut cache_updates: HashMap<String, (String, HashMap<String, export_cache::TagCacheEntry>)> =
+        HashMap::new();
 
     let import_requests: Vec<sprites::gm_import::SpriteImportRequest> = prepared_imports
         .into_iter()
         .zip(sprite_names)
-        .map(|(import, sprite_name)| sprites::gm_import::SpriteImportRequest {
-            sprite_name,
-            frames: import.frames,
-            gm_folder_path: import.gm_folder,
-            width: import.width,
-            height: import.height,
+        .map(|(import, sprite_name)| {
+            let rel_path = export_cache::relative_path_key(watch_dir, &import.aseprite_path)
+                .map_err(anyhow::Error::msg)?;
+            let file_hash = export_cache::hash_file(&import.aseprite_path)
+                .map_err(anyhow::Error::msg)?;
+
+            let file_entry = cache_updates
+                .entry(rel_path)
+                .or_insert_with(|| (file_hash, HashMap::new()));
+
+            file_entry.1.insert(
+                import.tag_name.clone(),
+                export_cache::TagCacheEntry {
+                    sprite_name: sprite_name.clone(),
+                    gm_folder: import.gm_folder.clone(),
+                    width: import.width,
+                    height: import.height,
+                    frame_count: import.frames.len() as u32,
+                },
+            );
+
+            Ok(sprites::gm_import::SpriteImportRequest {
+                sprite_name,
+                frames: import.frames,
+                gm_folder_path: import.gm_folder,
+                width: import.width,
+                height: import.height,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
     sprites::gm_import::import_sprites_batch(project_path, &import_requests)
+        .map_err(anyhow::Error::msg)?;
+
+    for (rel_path, (file_hash, tags)) in cache_updates {
+        cache.record_file(rel_path, file_hash, tags);
+    }
+    cache.retain_files(&current_rel_paths);
+    cache
+        .save(path_to_sprites_dir)
         .map_err(anyhow::Error::msg)?;
 
     if should_focus_gamemaker {

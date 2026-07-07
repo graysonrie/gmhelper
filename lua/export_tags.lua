@@ -52,10 +52,6 @@ local function exportTags(filePath, outputDir)
 
   -- Export each tag
   for i, tag in ipairs(tags) do
-    -- Reopen the file to ensure we're working with the original
-    app.open(filePath)
-    sprite = app.sprite
-
     local tagNameCamel = toCamelCase(tag.name)
     local frameCount = tag.toFrame.frameNumber - tag.fromFrame.frameNumber + 1
 

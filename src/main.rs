@@ -14,6 +14,7 @@ use crate::aseprite_exporter::{ensure_script_available, export_tags};
 
 mod aseprite_exporter;
 mod code_editor;
+mod export_cache;
 mod hot_reloader;
 
 const EXPORT_TAGS_SCRIPT: &str = include_str!("../lua/export_tags.lua");

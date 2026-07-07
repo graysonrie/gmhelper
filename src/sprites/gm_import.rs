@@ -587,6 +587,19 @@ mod tests {
     }
 
     #[test]
+    fn resolve_includes_existing_when_disambiguating_new_duplicate() {
+        let watch = Path::new("/sprites");
+        let batch = vec![
+            entry(watch, "characters/player.aseprite", "idle"),
+            entry(watch, "enemies/player.aseprite", "idle"),
+        ];
+
+        let names = resolve_sprite_names(watch, &batch).unwrap();
+        assert_eq!(names, vec!["sCharactersPlayerIdle", "sEnemiesPlayerIdle"]);
+        assert!(!names.contains(&"sPlayerIdle".to_string()));
+    }
+
+    #[test]
     fn resolve_parent_folder_disambiguation() {
         let watch = Path::new("/sprites");
         let entries = vec![
