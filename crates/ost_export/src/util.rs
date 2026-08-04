@@ -8,7 +8,7 @@ pub fn convert_to_pascal_case(input: &str) -> String {
 }
 
 pub trait PathStringUtil {
-    fn into_string(&self) -> String;
+    fn force_to_string(&self) -> String;
     /// Warning!: will panic if the Path does not have a file name for some reason
     fn unwrap_filename(&self) -> String;
 }
@@ -21,7 +21,7 @@ impl PathStringUtil for PathBuf {
             .to_string()
     }
 
-    fn into_string(&self) -> String {
+    fn force_to_string(&self) -> String {
         self.to_string_lossy().to_string()
     }
 }

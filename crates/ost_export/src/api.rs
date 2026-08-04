@@ -84,7 +84,7 @@ pub fn export_as_mp4_files(
 
     for (i, music_file) in music_files.iter().enumerate() {
         let input_path_filename = music_file.unwrap_filename();
-        let input_path = music_file.into_string(); // The full input path
+        let input_path = music_file.force_to_string(); // The full input path
 
         // Ex: 3 becomes 03 and 12 just becomes 12
         let output_filename_prefix = format!("{:02}. ", i);
@@ -100,7 +100,7 @@ pub fn export_as_mp4_files(
                 "{}.trimmed.wav",
                 input_path_filename.trim_end_matches(".wav")
             ))
-            .into_string();
+            .force_to_string();
 
         let trim_start_secs = options.trim_start_secs;
         let trim_end_secs = options.trim_end_secs;
@@ -118,7 +118,7 @@ pub fn export_as_mp4_files(
                 "{}.prod.wav",
                 input_path_filename.trim_end_matches(".wav")
             ))
-            .into_string();
+            .force_to_string();
 
         let loop_num = match loops {
             Mp4LoopOption::SetValue(val) => val,
@@ -143,7 +143,7 @@ pub fn export_as_mp4_files(
 
         let output_mp4_path = output_music_folder_path
             .join(output_mp4_filename)
-            .into_string();
+            .force_to_string();
         operations::export_production_mp4(&temp_prod_wav_path, &output_mp4_path, video_image_path)?;
         // Delete the temp prod wav:
         fs::remove_file(&temp_prod_wav_path)?;
@@ -175,19 +175,21 @@ pub fn export_as_game_music(
     let mut num_files_exported = 0;
     for music_file in music_files {
         let input_path_filename = music_file.unwrap_filename();
-        let input_path = music_file.into_string(); // The full input path
+        let input_path = music_file.force_to_string(); // The full input path
 
         let output_filename = "snd".to_string()
             + &util::convert_to_pascal_case(&input_path_filename.replace(".wav", ""))
             + ".ogg";
 
-        let output_ogg_path = output_music_folder_path.join(output_filename).into_string();
+        let output_ogg_path = output_music_folder_path
+            .join(output_filename)
+            .force_to_string();
         let temp_trimmed_wav_path = output_music_folder_path
             .join(format!(
                 "{}.trimmed.wav",
                 input_path_filename.trim_end_matches(".wav")
             ))
-            .into_string();
+            .force_to_string();
 
         let trim_start_secs = options.trim_start_secs;
         let trim_end_secs = options.trim_end_secs;
