@@ -11,7 +11,6 @@ mod aseprite_exporter;
 mod code_editor;
 mod export_cache;
 mod gm_config;
-mod history;
 mod hot_reloader;
 mod sprites;
 
