@@ -149,11 +149,16 @@ fn run_all_sprites() {
         std::process::exit(1);
     });
 
-    aseprite_exporter::export_all_sprites(&path_to_sprites_dir, Path::new(&project_path), true)
-        .unwrap_or_else(|e| {
-            eprintln!("Error: Failed to get current directory: {e}");
-            std::process::exit(1);
-        });
+    aseprite_exporter::export_all_sprites(
+        &path_to_sprites_dir,
+        Path::new(&project_path),
+        true,
+        export_cache::is_force_export(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("Error: Failed to get current directory: {e}");
+        std::process::exit(1);
+    });
 
     println!("All sprites exported successfully");
 }

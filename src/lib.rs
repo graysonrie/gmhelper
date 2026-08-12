@@ -1,9 +1,6 @@
 use std::{
     path::Path,
-    sync::{
-        atomic::AtomicBool,
-        Arc,
-    },
+    sync::{Arc, atomic::AtomicBool},
     thread::{self, JoinHandle},
 };
 
@@ -20,8 +17,14 @@ pub fn export_all_sprites(
     path_to_sprites_dir: &Path,
     project_path: &Path,
     should_focus_gamemaker: bool,
+    force_export: bool,
 ) -> Result<(), anyhow::Error> {
-    aseprite_exporter::export_all_sprites(path_to_sprites_dir, project_path, should_focus_gamemaker)
+    aseprite_exporter::export_all_sprites(
+        path_to_sprites_dir,
+        project_path,
+        should_focus_gamemaker,
+        force_export,
+    )
 }
 
 pub struct HotReloadTask {

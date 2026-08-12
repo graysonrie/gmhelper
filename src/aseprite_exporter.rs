@@ -8,7 +8,7 @@ use std::process::Command;
 use std::time::Duration;
 use walkdir::WalkDir;
 
-use crate::{export_cache, EXPORT_TAGS_SCRIPT, sprites};
+use crate::{EXPORT_TAGS_SCRIPT, export_cache, sprites};
 
 // ---------------------------------------------------------------------------
 // Sprite export internals
@@ -460,6 +460,7 @@ pub fn export_all_sprites(
     path_to_sprites_dir: &Path,
     project_path: &Path,
     should_focus_gamemaker: bool,
+    force_export: bool,
 ) -> Result<(), anyhow::Error> {
     let script_path = ensure_script_available().map_err(|e| anyhow::anyhow!(e))?;
 
@@ -476,13 +477,12 @@ pub fn export_all_sprites(
         .map(|entry| entry.into_path())
         .collect();
 
-    let force_export = export_cache::is_force_export();
     if force_export {
         println!("Cache bypassed (GMHELPER_FORCE_EXPORT)");
     }
 
-    let mut cache =
-        export_cache::ExportCache::load(path_to_sprites_dir, project_path).map_err(anyhow::Error::msg)?;
+    let mut cache = export_cache::ExportCache::load(path_to_sprites_dir, project_path)
+        .map_err(anyhow::Error::msg)?;
 
     let current_rel_paths: HashSet<String> = aseprite_paths
         .iter()
@@ -507,7 +507,10 @@ pub fn export_all_sprites(
     }
 
     if aseprite_paths.is_empty() {
-        println!("No .aseprite files found under {}", path_to_sprites_dir.display());
+        println!(
+            "No .aseprite files found under {}",
+            path_to_sprites_dir.display()
+        );
     } else if to_export.is_empty() {
         println!("Skipped {skipped} unchanged .aseprite file(s)");
     } else {
@@ -607,18 +610,15 @@ pub fn export_all_sprites(
     let resolved_names = sprites::gm_import::resolve_sprite_names(watch_dir, &resolution_entries)
         .map_err(anyhow::Error::msg)?;
 
-    let name_lookup: HashMap<(PathBuf, String), String> = resolution_entries
-        .into_iter()
-        .zip(resolved_names)
-        .collect();
+    let name_lookup: HashMap<(PathBuf, String), String> =
+        resolution_entries.into_iter().zip(resolved_names).collect();
 
     let sprite_names: Vec<String> = name_entries
         .iter()
         .map(|entry| {
-            name_lookup
-                .get(entry)
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("Missing resolved sprite name for {}", entry.0.display()))
+            name_lookup.get(entry).cloned().ok_or_else(|| {
+                anyhow::anyhow!("Missing resolved sprite name for {}", entry.0.display())
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -631,8 +631,8 @@ pub fn export_all_sprites(
         .map(|(import, sprite_name)| {
             let rel_path = export_cache::relative_path_key(watch_dir, &import.aseprite_path)
                 .map_err(anyhow::Error::msg)?;
-            let file_hash = export_cache::hash_file(&import.aseprite_path)
-                .map_err(anyhow::Error::msg)?;
+            let file_hash =
+                export_cache::hash_file(&import.aseprite_path).map_err(anyhow::Error::msg)?;
 
             let file_entry = cache_updates
                 .entry(rel_path)
