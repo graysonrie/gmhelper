@@ -513,7 +513,7 @@ fn read_sprite_overrides(
         xorigin: seq.get("xorigin")?.as_i64()? as i32,
         yorigin: seq.get("yorigin")?.as_i64()? as i32,
         playback_speed: seq.get("playbackSpeed")?.as_f64()?,
-        collision_kind
+        collision_kind,
     })
 }
 

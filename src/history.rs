@@ -74,7 +74,11 @@ pub fn list_text(history: &CommandHistory) -> String {
     let mut out = String::new();
     for (i, entry) in history.entries.iter().enumerate() {
         let n = i + 1;
-        out.push_str(&format!("#{}  gmhelper {}\n", n, shell_escape_args(&entry.args)));
+        out.push_str(&format!(
+            "#{}  gmhelper {}\n",
+            n,
+            shell_escape_args(&entry.args)
+        ));
     }
     out
 }

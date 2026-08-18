@@ -13,7 +13,7 @@ use windows::{
 };
 
 /// Focused the gamemaker window, goes to the Asset Browser, and clicks Expand All
-pub fn focus_gamemaker_window(try_open_asset_browser:bool) -> Result<()> {
+pub fn focus_gamemaker_window(try_open_asset_browser: bool) -> Result<()> {
     thread::sleep(Duration::from_millis(1000));
 
     let hwnd = find_window_containing("GameMaker")?;
@@ -30,7 +30,6 @@ pub fn focus_gamemaker_window(try_open_asset_browser:bool) -> Result<()> {
     }
 
     thread::sleep(Duration::from_millis(800));
-
 
     let rect = get_window_rect(hwnd)?;
 
@@ -50,7 +49,7 @@ pub fn focus_gamemaker_window(try_open_asset_browser:bool) -> Result<()> {
     )?;
     enigo.button(Button::Right, Direction::Click)?;
 
-    thread::sleep(Duration::from_millis(10 ));
+    thread::sleep(Duration::from_millis(10));
 
     enigo.move_mouse(expand_all_x, expand_all_y, Coordinate::Abs)?;
     enigo.button(Button::Left, Direction::Click)?;

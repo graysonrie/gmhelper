@@ -6,7 +6,7 @@ use std::{
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct GmConfig {
     pub use_gm_beta: bool,
-    pub all_sprites_export_yyp_path: Option<String>
+    pub all_sprites_export_yyp_path: Option<String>,
 }
 
 pub fn get_or_create_config() -> Result<GmConfig, String> {

@@ -21,7 +21,7 @@ const BUILD_BFF_PATH_BETA: &str =
 
 const IGOR_PATH_STANDARD: &str = r"C:\ProgramData\GameMakerStudio2\Cache\runtimes\runtime-2024.14.4.268\bin\igor\windows\x64\Igor.exe";
 const BUILD_BFF_PATH_STANDARD: &str =
-    r"C:\Users\grays\AppData\Local\GameMakerStudio2\GMS2TEMP\build.bff";
+    r"C:\Users\grays\AppData\Local\GameMakerStudio2-LTS2026\GMS2TEMP\build.bff";
 
 const RUNNER_EXE: &str = "Runner.exe";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -30,10 +30,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub fn run_reload(yyp_path: PathBuf, shutdown: &AtomicBool) -> anyhow::Result<()> {
     if !yyp_path.exists() {
-        anyhow::bail!(
-            "Project file '{}' does not exist",
-            yyp_path.display()
-        );
+        anyhow::bail!("Project file '{}' does not exist", yyp_path.display());
     }
 
     match yyp_path.extension().and_then(|e| e.to_str()) {
