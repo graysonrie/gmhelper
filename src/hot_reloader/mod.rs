@@ -7,7 +7,9 @@ use std::sync::{
     mpsc,
 };
 use std::time::{Duration, Instant};
+pub mod paths;
 
+use crate::types::GameMakerVersion;
 use crate::{code_editor, gm_config};
 
 unsafe extern "system" {
@@ -15,20 +17,16 @@ unsafe extern "system" {
     fn SetForegroundWindow(hwnd: isize) -> i32;
 }
 
-const IGOR_PATH_BETA: &str = r"C:\ProgramData\GameMakerStudio2-Beta\Cache\runtimes\runtime-2024.1400.4.968\bin\igor\windows\x64\Igor.exe";
-const BUILD_BFF_PATH_BETA: &str =
-    r"C:\Users\grays\AppData\Local\GameMakerStudio2-Beta\GMS2TEMP\build.bff";
-
-const IGOR_PATH_STANDARD: &str = r"C:\ProgramData\GameMakerStudio2\Cache\runtimes\runtime-2024.14.4.268\bin\igor\windows\x64\Igor.exe";
-const BUILD_BFF_PATH_STANDARD: &str =
-    r"C:\Users\grays\AppData\Local\GameMakerStudio2-LTS2026\GMS2TEMP\build.bff";
-
 const RUNNER_EXE: &str = "Runner.exe";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DEBOUNCE: Duration = Duration::from_millis(500);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-pub fn run_reload(yyp_path: PathBuf, shutdown: &AtomicBool) -> anyhow::Result<()> {
+pub fn run_reload(
+    yyp_path: PathBuf,
+    shutdown: &AtomicBool,
+    gamemaker_version: &GameMakerVersion,
+) -> anyhow::Result<()> {
     if !yyp_path.exists() {
         anyhow::bail!("Project file '{}' does not exist", yyp_path.display());
     }
@@ -64,7 +62,7 @@ pub fn run_reload(yyp_path: PathBuf, shutdown: &AtomicBool) -> anyhow::Result<()
     let mut pending_reload = false;
     let mut last_change: Option<Instant> = None;
 
-    let cfg = gm_config::get_or_create_config().map_err(|error| anyhow::anyhow!(error))?;
+    // let cfg = gm_config::get_or_create_config().map_err(|error| anyhow::anyhow!(error))?;
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -102,7 +100,7 @@ pub fn run_reload(yyp_path: PathBuf, shutdown: &AtomicBool) -> anyhow::Result<()
             last_change = None;
             println!("Detected .gml change, reloading...");
             kill_runner();
-            build_and_run(&yyp_path, cfg.use_gm_beta);
+            build_and_run(&yyp_path, gamemaker_version);
         }
     }
 
@@ -125,20 +123,12 @@ fn kill_runner() {
     }
 }
 
-fn build_and_run(yyp_path: &Path, use_gm_beta: bool) {
+fn build_and_run(yyp_path: &Path, gamemaker_version: &GameMakerVersion) -> anyhow::Result<()> {
     let saved_hwnd = unsafe { GetForegroundWindow() };
 
-    let build_bff_path = if use_gm_beta {
-        BUILD_BFF_PATH_BETA
-    } else {
-        BUILD_BFF_PATH_STANDARD
-    };
-
-    let igor_path = if use_gm_beta {
-        IGOR_PATH_BETA
-    } else {
-        IGOR_PATH_STANDARD
-    };
+    // Prefer to not use BFF path and see if we can build from a command line arg
+    // let build_bff_path = paths::get_build_bff_path(&gamemaker_version)?;
+    let igor_path = paths::get_igor_path(&gamemaker_version)?;
 
     let options_arg = format!("-options={build_bff_path}");
 
@@ -178,7 +168,8 @@ fn build_and_run(yyp_path: &Path, use_gm_beta: bool) {
                     }
                 });
             }
+            Ok(())
         }
-        Err(e) => eprintln!("  Error: Failed to launch Igor.exe: {e}"),
+        Err(e) => Err(anyhow::anyhow!("Error: Failed to launch Igor.exe: {e}")),
     }
 }

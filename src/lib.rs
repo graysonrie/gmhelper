@@ -4,6 +4,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+pub mod types;
 mod aseprite_exporter;
 mod code_editor;
 mod export_cache;
