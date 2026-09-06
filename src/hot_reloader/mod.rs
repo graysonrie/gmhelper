@@ -9,8 +9,8 @@ use std::sync::{
 use std::time::{Duration, Instant};
 pub mod paths;
 
+use crate::code_editor;
 use crate::types::GameMakerVersion;
-use crate::{code_editor, gm_config};
 
 unsafe extern "system" {
     fn GetForegroundWindow() -> isize;
@@ -62,8 +62,6 @@ pub fn run_reload(
     let mut pending_reload = false;
     let mut last_change: Option<Instant> = None;
 
-    // let cfg = gm_config::get_or_create_config().map_err(|error| anyhow::anyhow!(error))?;
-
     loop {
         if shutdown.load(Ordering::Relaxed) {
             break;
@@ -100,7 +98,9 @@ pub fn run_reload(
             last_change = None;
             println!("Detected .gml change, reloading...");
             kill_runner();
-            build_and_run(&yyp_path, gamemaker_version);
+            if let Err(error) = build_and_run(&yyp_path, gamemaker_version) {
+                eprintln!("  {error}");
+            }
         }
     }
 
@@ -126,16 +126,20 @@ fn kill_runner() {
 fn build_and_run(yyp_path: &Path, gamemaker_version: &GameMakerVersion) -> anyhow::Result<()> {
     let saved_hwnd = unsafe { GetForegroundWindow() };
 
-    // Prefer to not use BFF path and see if we can build from a command line arg
-    // let build_bff_path = paths::get_build_bff_path(&gamemaker_version)?;
-    let igor_path = paths::get_igor_path(&gamemaker_version)?;
-
-    let options_arg = format!("-options={build_bff_path}");
+    let igor_path = paths::get_igor_path(gamemaker_version)?;
+    let runtime_root = paths::get_runtime_root(gamemaker_version)?;
+    let user_folder = paths::get_user_folder(gamemaker_version)?;
+    let cache_dir = paths::get_igor_cache_dir(gamemaker_version)?;
+    let temp_dir = paths::get_igor_temp_dir(gamemaker_version)?;
 
     let result = Command::new(igor_path)
-        .arg("-j=8")
-        .arg(&options_arg)
-        .arg("-v")
+        .arg("/j=8")
+        .arg("/v")
+        .arg(format!("/project={}", yyp_path.display()))
+        .arg(format!("/rp={}", runtime_root.display()))
+        .arg(format!("/uf={}", user_folder.display()))
+        .arg(format!("/cache={}", cache_dir.display()))
+        .arg(format!("/temp={}", temp_dir.display()))
         .arg("--")
         .arg("Windows")
         .arg("Run")

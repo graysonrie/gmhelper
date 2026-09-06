@@ -100,6 +100,7 @@ impl ExportCache {
     }
 }
 
+#[allow(unused)]
 pub fn is_force_export() -> bool {
     std::env::var(FORCE_EXPORT_ENV)
         .map(|value| !value.is_empty())

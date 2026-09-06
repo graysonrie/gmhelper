@@ -16,6 +16,7 @@ mod aseprite_exporter;
 mod code_editor;
 mod export_cache;
 mod hot_reloader;
+mod types;
 
 const EXPORT_TAGS_SCRIPT: &str = include_str!("../lua/export_tags.lua");
 
@@ -110,7 +111,14 @@ fn main() {
         } => run_config(beta, all_sprites_export_project),
         SubCmd::Reload { project } => {
             let shutdown = std::sync::atomic::AtomicBool::new(false);
-            if let Err(error) = hot_reloader::run_reload(project, &shutdown) {
+            let gamemaker_version = match hot_reloader::paths::detect_gamemaker_version(&project) {
+                Ok(version) => version,
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    std::process::exit(1);
+                }
+            };
+            if let Err(error) = hot_reloader::run_reload(project, &shutdown, &gamemaker_version) {
                 eprintln!("Error: {error}");
                 std::process::exit(1);
             }

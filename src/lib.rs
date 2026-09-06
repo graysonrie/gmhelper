@@ -4,13 +4,13 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-pub mod types;
 mod aseprite_exporter;
 mod code_editor;
 mod export_cache;
 mod gm_config;
 mod hot_reloader;
 mod sprites;
+pub mod types;
 
 const EXPORT_TAGS_SCRIPT: &str = include_str!("../lua/export_tags.lua");
 
@@ -43,12 +43,17 @@ impl HotReloadTask {
     }
 }
 
-pub fn start_hot_reload_task(path_to_yyp: std::path::PathBuf) -> HotReloadTask {
+pub fn start_hot_reload_task(
+    path_to_yyp: std::path::PathBuf,
+    gamemaker_version: types::GameMakerVersion,
+) -> HotReloadTask {
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_for_thread = Arc::clone(&shutdown);
 
     let thread = thread::spawn(move || {
-        if let Err(error) = hot_reloader::run_reload(path_to_yyp, &shutdown_for_thread) {
+        if let Err(error) =
+            hot_reloader::run_reload(path_to_yyp, &shutdown_for_thread, &gamemaker_version)
+        {
             eprintln!("Hot reload error: {error}");
         }
     });
@@ -57,3 +62,5 @@ pub fn start_hot_reload_task(path_to_yyp: std::path::PathBuf) -> HotReloadTask {
 }
 
 pub use gm_config::{get_or_create_config, write_config};
+pub use hot_reloader::paths::detect_gamemaker_version;
+pub use types::GameMakerVersion;

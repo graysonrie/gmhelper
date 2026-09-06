@@ -26,6 +26,7 @@ struct SpriteExportInfo {
 pub struct PreparedSpriteImport {
     pub aseprite_path: PathBuf,
     pub tag_name: String,
+    #[allow(unused)]
     pub spritesheet_stem: String,
     pub frames: Vec<DynamicImage>,
     pub width: u32,
@@ -35,6 +36,7 @@ pub struct PreparedSpriteImport {
 
 const ASEPRITE_EXPORT_THREADS: usize = 4;
 
+#[allow(unused)]
 pub fn export_tags(
     aseprite_path: &Path,
     script_path: &Path,
